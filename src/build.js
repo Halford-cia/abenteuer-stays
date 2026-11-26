@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { about, collection, contact, experiences, extras, faqs, home, unit } from './pages.js';
 import { amenities, escapeHtml as h, footer, header, json, stayPath } from './components.js';
-import { bookingFor } from './booking.js';
+import { airbnbListing } from './booking.js';
 import { faq, instagram } from '../data/editorial.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -28,9 +28,9 @@ function rental(stay) {
   return {
     '@type':'VacationRental', '@id':absolute(stayPath(stay) + '#rental'),
     identifier:stay.id, name:stay.name, description:stay.description, url:absolute(stayPath(stay)),
-    image:stay.photos.map(image => absolute(image.src)), address, sameAs:[bookingFor(stay).url],
+    image:stay.photos.map(image => absolute(image.src)), address, sameAs:[airbnbListing(stay)],
     parentOrganization:{'@id':primary},
-    containsPlace:{'@type':'Accommodation', occupancy:{'@type':'QuantitativeValue', value:stay.guests},
+    containsPlace:{'@type':'Accommodation', occupancy:{'@type':'QuantitativeValue', [stay.plus ? 'minValue' : 'value']:stay.guests, unitText:'guests'},
       amenityFeature:amenities(stay).map(name => ({'@type':'LocationFeatureSpecification',name,value:true}))}
   };
 }
@@ -40,7 +40,7 @@ const pages = [
     description:'Explore ten private Hill Country stays near Fredericksburg, Texas. Find treetop domes, canvas retreats, tiny homes and country houses with private hot tubs.',
     render:() => home(stays), schema:business},
   {path:'/stays/',title:'The Stays | Fredericksburg Domes, Tents & Homes | Stay Eden',
-    description:'Compare all ten Stay Eden rentals by guest capacity, private hot tub and cowboy pool. See photos, amenities and Airbnb booking details for each stay.',
+    description:'Compare all ten Stay Eden rentals by guest capacity, private hot tub and cowboy pool. See photos, amenities and booking details for each stay.',
     render:() => collection(stays)},
   {path:'/experiences/',title:'Fredericksburg & Luckenbach Field Guide | Stay Eden',
     description:'Plan a Hill Country day around Main Street, Becker Vineyards, the Luckenbach dance hall and Old Tunnel State Park, with links to each destination.',
@@ -59,7 +59,7 @@ const pages = [
     render:faqs,schema:{'@type':'FAQPage',mainEntity:faq.map(([name,text]) =>
       ({'@type':'Question',name,acceptedAnswer:{'@type':'Answer',text}}))}},
   ...stays.map(stay => ({path:stayPath(stay), title:stay.name + ' | Fredericksburg, TX | Stay Eden',
-    description:`${stay.name} is a ${stay.type.toLowerCase()} for ${stay.guests}${stay.plus ? '+' : ''} near Fredericksburg. ${stay.feature}. Explore photos, amenities and guest ratings.`,
+    description:`${stay.name} is a ${stay.type.toLowerCase()} for ${stay.guests}${stay.plus ? '+' : ''} guests near Fredericksburg. ${stay.feature}. Explore photos, amenities and guest ratings.`,
     image:stay.photos[0],render:() => unit(stay),schema:rental(stay)}))
 ];
 
@@ -77,7 +77,8 @@ function document(page) {
 <meta property="og:image:alt" content="${h(image.alt)}"><meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#17261e"><link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preload" href="/fonts/instrument-serif.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/dm-sans.woff2" as="font" type="font/woff2" crossorigin>
+${page.path.startsWith('/stays/') && page.path !== '/stays/' ? '' : '<link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>'}
 <link rel="stylesheet" href="/style.css"><script src="/site.js" defer></script>
 <script type="application/ld+json">${json({'@context':'https://schema.org', ...schema})}</script>
 </head><body>${header(page.path, page.path === '/')}<main id="main" tabindex="-1">${page.render()}</main>${footer(page.path)}</body></html>\n`;

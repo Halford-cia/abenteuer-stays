@@ -58,7 +58,7 @@ test('each listing has its own photos, booking link, occupancy, amenities and re
     assert.ok(html.includes('href="' + booking.url + '">' + booking.label));
     assert.match(html, new RegExp(stay.reviews + ' Airbnb reviews'));
     assert.equal(schema['@type'], 'VacationRental');
-    assert.equal(schema.containsPlace.occupancy.value, stay.guests);
+    assert.equal(schema.containsPlace.occupancy[stay.plus ? 'minValue' : 'value'], stay.guests);
     assert.equal(schema.containsPlace.amenityFeature.some(a => a.name === 'Cowboy pool'), stay.cowboyPool);
     assert.ok(photos[stay.id].length >= 3);
     for (const img of photos[stay.id]) {

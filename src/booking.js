@@ -1,7 +1,12 @@
+// The Airbnb listing remains the source for reviews and host messaging.
+export function airbnbListing(stay) {
+  return 'https://www.airbnb.com/rooms/' + stay.id;
+}
+
 // Replace this provider when the host chooses a direct-booking engine.
 export function bookingFor(stay) {
   return {
-    url: 'https://www.airbnb.com/rooms/' + stay.id,
+    url: airbnbListing(stay),
     label: 'Book on Airbnb',
     detail: 'Choose dates on Airbnb for availability, pricing and cancellation terms.'
   };

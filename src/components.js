@@ -52,10 +52,11 @@ export function photo(image, {sizes = '100vw', priority = false, className = ''}
     class="${className}" ${priority ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">`;
 }
 
-export function stayCard(stay, {filter = false} = {}) {
+export function stayCard(stay, {filter = false, priority = false} = {}) {
   return `<article class="stay-card" ${filter ? `data-stay data-guests="${stay.guests}" data-tub="${stay.hotTub}" data-pool="${stay.cowboyPool}"` : ''}>
     <a class="card-link" href="${stayPath(stay)}">
-      <div class="card-image">${photo(stay.photos[0], {sizes:'(min-width: 960px) 30vw, (min-width: 610px) 46vw, 94vw'})}</div>
+      <div class="card-image"><picture><source media="(max-width: 609px)" srcset="${stay.photos[0].small}">
+      ${photo(stay.photos[0], {sizes:'(min-width: 960px) 30vw, 45vw', priority})}</picture></div>
       <p class="card-meta">${stay.type}<span>·</span>${capacity(stay)}</p>
       <h3>${stay.name}</h3><p class="card-desc">${stay.feature}</p></a></article>`;
 }

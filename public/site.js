@@ -83,7 +83,6 @@ function setupFilters() {
   window.addEventListener('pageshow', readUrl);
   window.addEventListener('popstate', readUrl);
   readUrl();
-  form.hidden = false;
 }
 
 function setupGallery() {
