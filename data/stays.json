@@ -1,0 +1,210 @@
+[
+  {
+    "slug": "treehouse-serenity-dome",
+    "id": "1127860565572358391",
+    "name": "Treehouse Serenity Dome",
+    "type": "Geodesic dome",
+    "guests": 2,
+    "hotTub": true,
+    "cowboyPool": true,
+    "rating": 4.86,
+    "reviews": 244,
+    "favorite": true,
+    "feature": "A suspended king bed beneath the trees",
+    "description": "Wake up among the branches, then take your coffee down to the suspended king bed below the deck. A soaking tub inside and a cowboy pool outside give you two very different ways to spend an afternoon.",
+    "amenities": [
+      "Suspended outdoor king bed",
+      "Indoor soaking tub",
+      "Kitchenette",
+      "Charcoal grill"
+    ]
+  },
+  {
+    "slug": "lunar-dome",
+    "id": "1127854231536656999",
+    "name": "Lunar Dome",
+    "type": "Geodesic dome",
+    "guests": 2,
+    "hotTub": true,
+    "cowboyPool": true,
+    "rating": 4.88,
+    "reviews": 220,
+    "favorite": true,
+    "feature": "An outdoor shower among the treetops",
+    "description": "Follow the deck to a suspended outdoor shower tucked into the trees. Back inside, a king bed and a deep soaking tub sit under the dome’s curved roof.",
+    "amenities": [
+      "Treetop outdoor shower",
+      "Indoor soaking tub",
+      "King bed",
+      "Kitchenette",
+      "Hammock"
+    ]
+  },
+  {
+    "slug": "cloud-dome",
+    "id": "848793194923498250",
+    "name": "Cloud Dome",
+    "type": "Geodesic dome",
+    "guests": 2,
+    "hotTub": true,
+    "cowboyPool": false,
+    "rating": 4.89,
+    "reviews": 272,
+    "favorite": true,
+    "feature": "A hammock bed on a wooded bluff",
+    "description": "Settle into a hammock bed at the edge of a wooded bluff. The outdoor shower and private hot tub bring the best parts of the day out into the trees.",
+    "amenities": [
+      "Hammock bed",
+      "Wooded bluff setting",
+      "Outdoor shower",
+      "Indoor walk-in shower"
+    ]
+  },
+  {
+    "slug": "cherry-cove",
+    "id": "847842029650472730",
+    "name": "Cherry Cove",
+    "type": "Canvas tent",
+    "guests": 2,
+    "hotTub": true,
+    "cowboyPool": true,
+    "rating": 4.88,
+    "reviews": 239,
+    "favorite": true,
+    "feature": "Pool afternoons and projector nights",
+    "description": "Trade the hammock chairs for a dip in the cowboy pool, then draw the tent closed for a movie on the projector. A king bed and en-suite shower make it easy to settle in.",
+    "amenities": [
+      "King bed",
+      "Movie projector",
+      "Hammock chairs",
+      "Kitchenette",
+      "En-suite walk-in shower"
+    ]
+  },
+  {
+    "slug": "oak-retreat",
+    "id": "849204946415304899",
+    "name": "Oak Retreat",
+    "type": "Canvas tent",
+    "guests": 2,
+    "hotTub": true,
+    "cowboyPool": false,
+    "rating": 4.85,
+    "reviews": 312,
+    "favorite": false,
+    "feature": "A king bed and movies under canvas",
+    "description": "Pull up a hammock chair and let the afternoon pass. Come evening, the canvas walls frame a king bed and a projector for a private movie night.",
+    "amenities": [
+      "King bed",
+      "Movie projector",
+      "Hammock chairs",
+      "Kitchenette",
+      "En-suite walk-in shower"
+    ]
+  },
+  {
+    "slug": "pecan-haven",
+    "id": "849201607008940892",
+    "name": "Pecan Haven",
+    "type": "Treehouse tent",
+    "guests": 2,
+    "hotTub": true,
+    "cowboyPool": false,
+    "rating": 4.87,
+    "reviews": 351,
+    "favorite": false,
+    "feature": "A canvas treehouse ten feet up",
+    "description": "Climb up to a canvas tent raised about ten feet above the ground. Start the day in the outdoor shower, or stretch out in a hammock chair and watch the trees.",
+    "amenities": [
+      "Raised treehouse deck",
+      "King bed",
+      "Hammock chairs",
+      "Indoor and outdoor showers",
+      "Smart TV"
+    ]
+  },
+  {
+    "slug": "walnut-horizon",
+    "id": "777658491851767659",
+    "name": "Walnut Horizon",
+    "type": "Tiny home",
+    "guests": 4,
+    "hotTub": true,
+    "cowboyPool": false,
+    "rating": 4.81,
+    "reviews": 295,
+    "favorite": false,
+    "feature": "An observation deck above a tiny home",
+    "description": "Bring supper up to the observation deck. With a full kitchen, a soaking tub and a sofa that opens into a California king bed, this little house has room for four.",
+    "amenities": [
+      "Observation deck",
+      "Full kitchen",
+      "Indoor soaking tub",
+      "Convertible California king sofa bed"
+    ]
+  },
+  {
+    "slug": "cozy-tiny-home",
+    "id": "1451104893033342131",
+    "name": "Cozy Tiny Home",
+    "type": "Tiny home",
+    "guests": 2,
+    "hotTub": true,
+    "cowboyPool": true,
+    "rating": 4.77,
+    "reviews": 111,
+    "favorite": true,
+    "feature": "A reading loft and a private pool deck",
+    "description": "Bring a book for the reading loft and a towel for the cowboy pool. A fenced deck gives you space outdoors, while the king bed sits up in the loft.",
+    "amenities": [
+      "Reading loft",
+      "Lofted king bed",
+      "Fenced private deck",
+      "Kitchen"
+    ]
+  },
+  {
+    "slug": "das-grun-haus",
+    "id": "826746887758192914",
+    "name": "Das Grun Haus",
+    "type": "Country cottage",
+    "guests": 6,
+    "hotTub": true,
+    "cowboyPool": false,
+    "rating": 4.82,
+    "reviews": 266,
+    "favorite": true,
+    "feature": "A backyard made for fireside evenings",
+    "description": "Also known as the Green House, this two-bedroom cottage sits on a shared ten-acre property. Set up a yard game, light the charcoal grill and gather around the fire pit after dinner.",
+    "amenities": [
+      "Two king bedrooms",
+      "Two bathrooms",
+      "Private backyard",
+      "Fire pit",
+      "Yard games",
+      "Charcoal grill"
+    ]
+  },
+  {
+    "slug": "the-hidden-tavern",
+    "id": "970532583694054346",
+    "name": "The Hidden Tavern",
+    "type": "Country house",
+    "guests": 16,
+    "plus": true,
+    "hotTub": true,
+    "cowboyPool": false,
+    "rating": 4.87,
+    "reviews": 105,
+    "favorite": true,
+    "feature": "A secret passage to a private speakeasy",
+    "description": "On more than ten acres, this five-bedroom house gives a group room to spread out. There’s an upstairs bunkroom, a pair of hot tubs and a speakeasy hidden beyond a secret passage.",
+    "amenities": [
+      "Two private hot tubs",
+      "Hidden speakeasy",
+      "Five bedrooms",
+      "Upstairs bunkroom",
+      "Full kitchen"
+    ]
+  }
+]
