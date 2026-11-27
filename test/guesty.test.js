@@ -972,3 +972,29 @@ test('the owner script repeats the effective wait beside the suggested map, and 
   assert.match(readme, /later of/);
   assert.doesNotMatch(readme, /blank for 24 hours/);
 });
+
+// Round 5, fix 1: an incomplete listing list (no map printed) still names the effective wait for
+// the one retry, and no guide instruction gives a flat 24-hour wait of its own.
+test('an incomplete listing list names the later wait for the retry, and the guide never gives a flat 24 hours', async () => {
+  const short = {results: [{_id: 'aaaaaa1', title: 'Lunar Dome'}], pagination: {total: 2, cursor: {next: null}}};
+  const retry = async tokenHeaders => {
+    const lines = [];
+    const fetchMock = async url => (new URL(url).href === TOKEN_URL
+      ? json(200, {token_type: 'Bearer', expires_in: 86400, access_token: TOKEN}, tokenHeaders)
+      : json(200, short));
+    const error = await run({env: {GUESTY_BE_CLIENT_ID: CLIENT, GUESTY_BE_CLIENT_SECRET: SECRET}, fetch: fetchMock, log: line => lines.push(line), now: () => NOW, stays})
+      .then(() => null, e => e);
+    assert.ok(error, 'an incomplete list must stop the run');
+    assert.match(error.message, /incomplete/);
+    assert.ok(!lines.join('\n').includes('Suggested data/guesty-listings.json'));
+    return error.message;
+  };
+  const later = await retry({'ratelimit-remaining': '0', 'ratelimit-reset': String(30 * 3600)});
+  assert.match(later, /before 2026-12-03T00:00:00\.000Z/);
+  assert.doesNotMatch(later, /2026-12-02T18:00/);
+  assert.match(await retry({'ratelimit-remaining': '4'}), /before 2026-12-02T18:00:00\.000Z/);
+  const guide = read('docs/GUESTY_SETUP.md');
+  const step4 = guide.slice(guide.indexOf('## 4.'), guide.indexOf('## 5.'));
+  assert.match(step4, /incomplete[^\n]*the later of the two/);
+  assert.doesNotMatch(guide, /wait the 24 hours|24-hour wait in step 4|new 24-hour wait/);
+});

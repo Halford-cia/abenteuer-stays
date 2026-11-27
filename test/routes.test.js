@@ -5,8 +5,7 @@
 // exported route fails here, so a one-character change on either side cannot pass.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { registerHooks } from 'node:module';
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -21,9 +20,12 @@ const LISTING = 'aaaaaa111111';
 const emptyMap = Object.fromEntries(stays.map(s => [s.slug, '']));
 const map = {...emptyMap, 'lunar-dome': LISTING};
 
-// The functions import @netlify/blobs and data/guesty-listings.json. In this test process the
-// first is an in-memory store with ETags and conditional writes, the second the map above (the
-// committed file is empty until Hank fills it).
+// The functions import @netlify/blobs and data/guesty-listings.json. In this test the first is an
+// in-memory store with ETags and conditional writes, the second the map above (the committed file
+// is empty until Hank fills it). Round 5, fix 2: no module loader hooks (module.registerHooks needs
+// Node 22.15, and package.json declares >=22). The committed function and library files are copied
+// byte for byte into a temporary tree beside the mapped data file and a stub @netlify/blobs package,
+// and imported from there, so a change to a committed route still fails here on every Node 22.
 const rows = new Map();
 let version = 0;
 globalThis.routeTestStore = {
@@ -36,20 +38,21 @@ globalThis.routeTestStore = {
     return {modified: true, etag: String(version)};
   }
 };
-const functionsDir = pathToFileURL(join(root, 'netlify/functions/')).href;
-registerHooks({
-  resolve(specifier, context, next) {
-    if (specifier === '@netlify/blobs') return {url: 'data:text/javascript,export const getStore = () => globalThis.routeTestStore;', shortCircuit: true};
-    if (specifier.endsWith('/data/guesty-listings.json') && context.parentURL && context.parentURL.startsWith(functionsDir)) {
-      return {url: 'data:application/json,' + encodeURIComponent(JSON.stringify(map)), format: 'json', importAttributes: context.importAttributes, shortCircuit: true};
-    }
-    return next(specifier, context);
-  }
-});
+const fnRoot = mkdtempSync(join(tmpdir(), 'stay-eden-functions-'));
+test.after(() => rmSync(fnRoot, {recursive: true, force: true}));
+cpSync(join(root, 'netlify'), join(fnRoot, 'netlify'), {recursive: true});
+cpSync(join(root, 'data'), join(fnRoot, 'data'), {recursive: true});
+cpSync(join(root, 'package.json'), join(fnRoot, 'package.json'));   // "type": "module" for netlify/lib/*.js
+writeFileSync(join(fnRoot, 'data/guesty-listings.json'), JSON.stringify(map));
+mkdirSync(join(fnRoot, 'node_modules/@netlify/blobs'), {recursive: true});
+writeFileSync(join(fnRoot, 'node_modules/@netlify/blobs/package.json'), JSON.stringify({name: '@netlify/blobs', type: 'module', exports: './index.js'}));
+writeFileSync(join(fnRoot, 'node_modules/@netlify/blobs/index.js'), 'export const getStore = () => globalThis.routeTestStore;\n');
+const functionsDir = pathToFileURL(join(fnRoot, 'netlify/functions/')).href;
 
 // Every function the deploy publishes, with the path it registers.
 const functions = [];
 for (const file of readdirSync(join(root, 'netlify/functions')).filter(f => /\.m?js$/.test(f)).sort()) {
+  assert.equal(readFileSync(join(fnRoot, 'netlify/functions', file), 'utf8'), readFileSync(join(root, 'netlify/functions', file), 'utf8'), file);
   const mod = await import(functionsDir + file);
   assert.equal(typeof mod.default, 'function', file);
   assert.equal(typeof mod.config?.path, 'string', file + ' registers no path');

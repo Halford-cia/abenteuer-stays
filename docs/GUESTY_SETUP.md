@@ -40,8 +40,8 @@ cd ~/str/guesty && git pull && node scripts/guesty-listings.mjs
 
 - Before the request is sent, the script prints a time 24 hours ahead. **Keep every stay in `data/guesty-listings.json` blank until at least that time.** This holds whatever the script prints next, including a report of 4 or 5 tokens left, an error, a timeout or a stop with Ctrl-C.
 - If Guesty answers with its own stop that ends later (a 429's `Retry-After`, or no slot left and a `ratelimit-reset` beyond 24 hours), the script prints that later time too. **Wait for the later of the two times**, both before mapping any stay and before running the script again. The line above the suggested map repeats the time that applies.
-- Do not run the script again before that time. A second run starts a new 24-hour wait.
-- The script prints nothing if the listing list is incomplete: a missing results list, a listing without an id, fewer listings than Guesty's stated total, or more pages than it reads. In that case, wait the 24 hours and run it once more. Never run it in a loop.
+- Do not run the script again before that time. A second run starts a new wait under the same rule.
+- The script prints no map if the listing list is incomplete: a missing results list, a listing without an id, fewer listings than Guesty's stated total, or more pages than it reads. Its error repeats the time that applies. In that case, wait until that time (the later of the two above) and run it once more. Never run it in a loop.
 - It writes no file. Copy the suggested map, and check each line against the printed list.
 
 ## 5. Map nine stays and keep one blank
@@ -85,7 +85,7 @@ Once step 6 passes on both kinds of page, fill the tenth stay, run `npm run chec
 1. Correct the variable in Netlify (step 3 settings) and **redeploy**.
 2. Let the shared cooldown expire: 1 hour after a `token_401`, doubling after each further one, up to 24 hours. A `token_hold` or `token_allowance` also frees itself.
 3. **Never delete** the `token-lease` or `token-issuance` entries in the `guesty` Blobs store. They hold the token count and the cooldown. Deleting them can spend tokens and lock the site out for the day.
-4. Do not run the listing script to test new credentials. If you do, the 24-hour wait in step 4 applies again.
+4. Do not run the listing script to test new credentials. If you do, the wait in step 4 applies again: 24 hours, or Guesty's later stop.
 
 ## 9. Lighthouse and merge
 

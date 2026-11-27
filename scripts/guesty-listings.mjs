@@ -125,7 +125,12 @@ export async function run({env = process.env, fetch: fetchImpl = fetch, log = co
   if (!clientId || !clientSecret) throw new Error('Both the client ID and the client secret are needed.');
 
   const {token, waitUntil} = await requestOwnerToken({fetch: fetchImpl, clientId, clientSecret, log, now});
-  const listings = await listAllListings(fetchImpl, token);
+  // Round 5, fix 1: an incomplete or failed list still names the one effective wait for the retry.
+  let listings;
+  try { listings = await listAllListings(fetchImpl, token); } catch (error) {
+    error.message += ` Keep every stay blank and do not run this script again before ${stamp(new Date(waitUntil))}, the wait printed above.`;
+    throw error;
+  }
 
   log(`\n${listings.length} listing(s) in this Booking Engine API instance:\n`);
   for (const listing of listings) log(`  ${listing.id}  ${listing.title}`);
