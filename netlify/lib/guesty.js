@@ -9,9 +9,13 @@
 // - every token REQUEST (not every success) is written to a shared rolling 24-hour allowance in the
 //   Blobs store BEFORE it is sent, so a lost reply, a timeout or a failed write after Guesty issued a
 //   token still counts; both functions share the allowance;
-// - a lower ratelimit-remaining from Guesty, until its reset, lowers the allowance further;
+// - the same write sets a hold that only the write recording Guesty's answer lifts, so a lower
+//   ratelimit-remaining from Guesty is never lost to a failed write; until its reset it lowers the
+//   allowance further;
 // - one lease entry lets only one instance at a time ask for a token, and failures back off.
 // When the allowance is spent the site serves the Airbnb fallback until a slot frees up.
+// The owner script (scripts/guesty-listings.mjs) cannot write this record: after running it, every
+// stay stays unmapped for 24 hours (docs/GUESTY_SETUP.md).
 //
 // The store is site-wide, and Netlify lets build plugins read every store on a site. So the cached
 // token is never stored in the clear: it is sealed with AES-256-GCM under a key derived from
@@ -28,6 +32,8 @@ const REFRESH_EARLY_MS = 5 * 60e3;       // Guesty's recipe: renew 5 minutes bef
 const MIN_TOKEN_GAP_MS = 8 * 3600e3;     // After a success, no new token for 8 hours.
 const CLAIM_MS = 60e3;                   // How long one instance holds the right to request a token.
 const HOUR = 3600e3;
+const SETTLE_TRIES = 5;                  // Tries to record Guesty's answer before the hold is left standing.
+const PAUSE_TRIES = 25;                  // Tries to land a 429 pause against other writers (see pauseApi).
 const SEAL_INFO = 'stay-eden guesty token cache v1';
 
 export class GuestyUnavailable extends Error {
@@ -36,8 +42,6 @@ export class GuestyUnavailable extends Error {
     this.status = status;
   }
 }
-
-const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 
 function headerSeconds(res, names) {
   for (const name of names) {
@@ -57,11 +61,12 @@ function retryAfterMs(res, now) {
   return reset ? reset * 1000 : null;
 }
 
-// How long to wait before the next token request after a failure.
-export function tokenBackoffMs(status, failures, res) {
+// How long to wait before the next token request after a failure. A 429 waits for the server's
+// whole Retry-After (delta-seconds or HTTP date) or ratelimit-reset, never less than 15 minutes.
+export function tokenBackoffMs(status, failures, res, now = Date.now()) {
   if (status === 429) {
-    const seconds = res && headerSeconds(res, ['retry-after', 'ratelimit-reset']);
-    return clamp(seconds ? seconds * 1000 : HOUR, 15 * 60e3, 24 * HOUR);
+    const wait = res ? retryAfterMs(res, now) : null;
+    return Math.max(wait === null ? HOUR : wait, 15 * 60e3);
   }
   if (status === 400 || status === 401 || status === 403) return Math.min(HOUR * 2 ** failures, 24 * HOUR);
   return Math.min(2 * 60e3 * 2 ** failures, HOUR);
@@ -93,14 +98,29 @@ export function openToken(record, key) {
 }
 
 // The rolling allowance: attempts in the last 24 hours, plus Guesty's own count when it sent one.
+// A hold is written with every attempt, before it is sent, and lifted only by the write that records
+// Guesty's answer. While a hold stands nothing is requested: if that write never lands (a storage
+// error, a rejected conditional write, an instance that died), a count Guesty may have lowered is not
+// forgotten. A hold lasts 24 hours, the longest a used token slot takes to regenerate; an unreadable
+// hold counts as standing.
 export function allowanceLeft(record, now) {
   const attempts = (record && Array.isArray(record.attempts) ? record.attempts : []).filter(t => Number.isFinite(t) && now - t < DAY);
+  const hold = record && record.hold;
+  if (hold && (typeof hold !== 'object' || !Number.isFinite(hold.until) || now < hold.until)) return {left: 0, attempts, held: true};
   let left = TOKEN_ALLOWANCE - attempts.length;
   const guesty = record && record.guesty;
   if (guesty && Number.isFinite(guesty.remaining) && Number.isFinite(guesty.at) && Number.isFinite(guesty.resetAt) && now < guesty.resetAt) {
     left = Math.min(left, guesty.remaining - attempts.filter(t => t > guesty.at).length);
   }
-  return {left, attempts};
+  return {left, attempts, held: false};
+}
+
+// Guesty's own count of token slots from a token reply, or null when it sent none.
+function quotaFrom(res, at) {
+  const raw = (res.headers.get('ratelimit-remaining') || '').trim();
+  const reset = headerSeconds(res, ['ratelimit-reset']);
+  if (!/^\d+$/.test(raw) || !reset) return null;
+  return {remaining: Number(raw), at, resetAt: at + reset * 1000};
 }
 
 /**
@@ -115,15 +135,36 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
     try { return await op(); } catch { throw new GuestyUnavailable('store_error'); }
   }
 
-  // A deadline we own and clear, so the pending timer keeps the request alive until it fires.
-  async function send(url, init) {
+  // One deadline we own covers the whole exchange: the response headers AND the body. A body that
+  // stalls after good headers is a timeout like any other.
+  // Returns {res, body}: body is the parsed JSON of a 2xx reply, or undefined when it was not JSON.
+  async function exchange(url, init) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new DOMException('Guesty did not answer in time', 'TimeoutError')), timeoutMs);
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const reason = new DOMException('Guesty did not answer in time', 'TimeoutError');
+        controller.abort(reason);
+        reject(reason);
+      }, timeoutMs);
+    });
+    deadline.catch(() => {});
+    const timedOut = () => controller.signal.aborted;
     try {
-      return await fetch(url, {...init, signal: controller.signal});
-    } catch (error) {
-      const name = error && error.name;
-      throw new GuestyUnavailable(name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network');
+      let res;
+      try {
+        res = await Promise.race([fetch(url, {...init, signal: controller.signal}), deadline]);
+      } catch (error) {
+        const name = error && error.name;
+        throw new GuestyUnavailable(timedOut() || name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network');
+      }
+      if (!res.ok) return {res, body: undefined};
+      try {
+        return {res, body: await Promise.race([res.json(), deadline])};
+      } catch {
+        if (timedOut()) throw new GuestyUnavailable('timeout');
+        return {res, body: undefined};
+      }
     } finally {
       clearTimeout(timer);
     }
@@ -132,17 +173,21 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
   const fresh = token => Boolean(token && typeof token.accessToken === 'string' && now() < token.expiresAt - REFRESH_EARLY_MS);
   const readToken = async () => openToken(await stored(() => store.get('token', {type: 'json'})), key);
 
-  // Record Guesty's own count of token slots left; best effort, the attempt is already counted.
-  async function noteGuestyQuota(res) {
-    const remaining = Number.parseInt(res.headers.get('ratelimit-remaining') || '', 10);
-    const reset = headerSeconds(res, ['ratelimit-reset']);
-    if (!Number.isFinite(remaining) || !reset) return;
-    const at = now();
-    try {
-      const current = await store.getWithMetadata('token-issuance', {type: 'json'});
-      const data = {...(current && current.data), guesty: {remaining, at, resetAt: at + reset * 1000}};
-      await store.setJSON('token-issuance', data, current ? {onlyIfMatch: current.etag} : {onlyIfNew: true});
-    } catch { /* the pre-request record stands */ }
+  // Record what Guesty's answer to the attempt made at `at` said, and lift that attempt's hold, in one
+  // conditional write. A rejected write is retried against the new record; if it never lands, the
+  // hold stands (no token is requested until it expires) and Guesty's count is not lost.
+  async function settle(at, quota) {
+    for (let attempt = 0; attempt < SETTLE_TRIES; attempt++) {
+      try {
+        const current = await store.getWithMetadata('token-issuance', {type: 'json'});
+        const data = {...(current && current.data)};
+        if (data.hold && data.hold.at === at) delete data.hold;
+        if (quota) data.guesty = quota;
+        const write = await store.setJSON('token-issuance', data, current ? {onlyIfMatch: current.etag} : {onlyIfNew: true});
+        if (write && write.modified) return true;
+      } catch { /* try again; the hold stands if no try lands */ }
+    }
+    return false;
   }
 
   async function requestToken() {
@@ -155,38 +200,41 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
       throw new GuestyUnavailable('token_backoff');
     }
     const issuance = await stored(() => store.getWithMetadata('token-issuance', {type: 'json'}));
-    const {left, attempts} = allowanceLeft(issuance && issuance.data, now());
+    const {left, attempts, held} = allowanceLeft(issuance && issuance.data, now());
+    if (held) throw new GuestyUnavailable('token_hold');
     if (left <= 0) throw new GuestyUnavailable('token_allowance');
 
     const failures = Number.isInteger(state.failures) ? state.failures : 0;
     const claim = await stored(() => store.setJSON('token-lease', {until: now() + CLAIM_MS, failures},
       lease ? {onlyIfMatch: lease.etag} : {onlyIfNew: true}));
     if (!claim || !claim.modified) throw new GuestyUnavailable('token_busy');
-    // Count the attempt before it is sent. If this write does not land, nothing is sent.
+    // Count the attempt and set its hold before it is sent. If this write does not land, nothing is sent.
+    const at = now();
     const counted = await stored(() => store.setJSON('token-issuance',
-      {...(issuance && issuance.data), attempts: [...attempts, now()]},
+      {...(issuance && issuance.data), attempts: [...attempts, at], hold: {at, until: at + DAY}},
       issuance ? {onlyIfMatch: issuance.etag} : {onlyIfNew: true}));
     if (!counted || !counted.modified) throw new GuestyUnavailable('token_busy');
 
     const fail = async (status, res) => {
-      await stored(() => store.setJSON('token-lease', {until: now() + tokenBackoffMs(res ? res.status : 0, failures, res), failures: failures + 1}));
+      await stored(() => store.setJSON('token-lease', {until: now() + tokenBackoffMs(res ? res.status : 0, failures, res, now()), failures: failures + 1}));
       throw new GuestyUnavailable(status);
     };
 
-    let res;
+    let reply;
     try {
-      res = await send(TOKEN_URL, {
+      reply = await exchange(TOKEN_URL, {
         method: 'POST',
         headers: {accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded'},
         body: new URLSearchParams({grant_type: 'client_credentials', scope: 'booking_engine:api', client_id: clientId, client_secret: clientSecret})
       });
     } catch (error) {
+      // No answer: the attempt stays counted, and there is no count of Guesty's to keep.
+      await settle(at, null);
       return fail('token_' + error.status);
     }
-    await noteGuestyQuota(res);
+    const {res, body} = reply;
+    await settle(at, quotaFrom(res, now()));
     if (!res.ok) return fail('token_' + res.status, res);
-    let body = null;
-    try { body = await res.json(); } catch { /* handled below */ }
     if (!body || typeof body.access_token !== 'string' || !body.access_token || !(Number(body.expires_in) > 0)) {
       return fail('token_malformed');
     }
@@ -215,16 +263,21 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
     }
   }
 
-  // Keep the latest outstanding pause: a shorter Retry-After never replaces a longer one.
+  // Keep the latest outstanding pause: a shorter Retry-After never replaces a longer one. Each round
+  // of conditional writes lands at least one writer, and a writer stops as soon as the stored
+  // deadline covers its own, so N concurrent writers need at most N rounds. PAUSE_TRIES is well above
+  // the concurrency this site sees; the small random wait spreads writers that collide.
   async function pauseApi(until) {
     memo.apiUntil = Math.max(memo.apiUntil || 0, until);
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < PAUSE_TRIES; attempt++) {
       const current = await stored(() => store.getWithMetadata('api-backoff', {type: 'json'}));
       const existing = current && current.data && Number.isFinite(current.data.until) ? current.data.until : 0;
-      if (existing >= until) { memo.apiUntil = Math.max(memo.apiUntil, existing); return; }
+      if (existing >= until) { memo.apiUntil = Math.max(memo.apiUntil, existing); return true; }
       const write = await stored(() => store.setJSON('api-backoff', {until}, current ? {onlyIfMatch: current.etag} : {onlyIfNew: true}));
-      if (write && write.modified) return;
+      if (write && write.modified) return true;
+      await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 5 * (attempt + 1))));
     }
+    return false;
   }
 
   async function request(method, path, body) {
@@ -237,7 +290,7 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
     const current = await token();
     const headers = {authorization: 'Bearer ' + current.accessToken, accept: 'application/json; charset=utf-8'};
     if (body) headers['content-type'] = 'application/json';
-    const res = await send(API_BASE + path, {method, headers, body: body ? JSON.stringify(body) : undefined});
+    const {res, body: reply} = await exchange(API_BASE + path, {method, headers, body: body ? JSON.stringify(body) : undefined});
     if (res.status === 401) {
       await invalidate(current);
       throw new GuestyUnavailable('upstream_401');
@@ -249,7 +302,8 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
       throw new GuestyUnavailable('upstream_429');
     }
     if (!res.ok) throw new GuestyUnavailable('upstream_' + res.status);
-    try { return await res.json(); } catch { throw new GuestyUnavailable('upstream_malformed'); }
+    if (reply === undefined) throw new GuestyUnavailable('upstream_malformed');
+    return reply;
   }
 
   return {

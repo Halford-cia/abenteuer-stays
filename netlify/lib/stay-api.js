@@ -53,16 +53,22 @@ export function mapCalendar(body, from, to) {
     if (hasMin && !(Number.isInteger(entry.minNights) && entry.minNights > 0)) throw new GuestyUnavailable('calendar_malformed');
     if (!optionalBoolean(entry.cta) || !optionalBoolean(entry.ctd)) throw new GuestyUnavailable('calendar_malformed');
     if (entry.date < from || entry.date > to) continue;
-    seen.set(entry.date, {
+    const day = {
       date: entry.date,
       available: entry.status === 'available',
       minNights: hasMin ? entry.minNights : null,
       noArrival: entry.cta === true,
       noDeparture: entry.ctd === true
-    });
+    };
+    // Two rows for one date: identical ones collapse; any difference (status, minimum, closures)
+    // means Guesty's reply contradicts itself, and the whole calendar is refused.
+    const fingerprint = JSON.stringify([entry.status, day.minNights, day.noArrival, day.noDeparture]);
+    const earlier = seen.get(entry.date);
+    if (earlier && earlier.fingerprint !== fingerprint) throw new GuestyUnavailable('calendar_malformed');
+    seen.set(entry.date, {day, fingerprint});
   }
   if (seen.size === 0) throw new GuestyUnavailable('calendar_malformed');
-  return [...seen.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+  return [...seen.values()].map(entry => entry.day).sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
 const money = value => typeof value === 'number' && Number.isFinite(value);
@@ -78,9 +84,9 @@ function minor(value, digits) {
   return Math.abs(scaled - whole) < 1e-6 ? whole : null;
 }
 
-// The two documented layouts of a rate plan entry: the OpenAPI schema nests name and money in
+// The two documented layouts of a rate plan entry: the OpenAPI schema nests name, days and money in
 // ratePlans[].ratePlan; the Reservation Quote Flow example puts them on ratePlans[] itself. The
-// name, currency and invoice are taken from the same entry.
+// name, nightly days, currency and invoice are taken from the same entry.
 function planParts(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const inner = entry.ratePlan && typeof entry.ratePlan === 'object' ? entry.ratePlan : null;
@@ -88,55 +94,118 @@ function planParts(entry) {
   if (!layer || !layer.money || typeof layer.money !== 'object') return null;
   const other = layer === inner ? entry : inner;
   const name = [layer.name, other && other.name].find(value => typeof value === 'string' && value.trim()) || '';
-  return {name: name.trim().slice(0, 80), money: layer.money};
+  const days = layer.days !== undefined && layer.days !== null ? layer.days : other ? other.days : undefined;
+  return {name: name.trim().slice(0, 80), money: layer.money, days};
+}
+
+const malformed = () => new GuestyUnavailable('quote_malformed');
+
+// The plan's dated nightly prices (ratePlan.days[].date / price / currency), shown as Guesty sends
+// them. Absent or empty: no nightly breakdown. Present: exactly one row per night of the requested
+// stay, each a finite non-negative price in the plan's currency at its precision, or the quote is
+// refused (a nightly list for other dates means the quote is not for this stay).
+function nightlyRates(days, currency, digits, stay) {
+  if (days === undefined || days === null || (Array.isArray(days) && days.length === 0)) return [];
+  if (!Array.isArray(days) || !stay) throw malformed();
+  const nights = [];
+  for (let night = stay.checkIn; night < stay.checkOut; night = addDays(night, 1)) nights.push(night);
+  if (days.length !== nights.length) throw malformed();
+  const rows = days.map(day => {
+    if (!day || typeof day !== 'object' || !isDate(day.date) || !money(day.price) || day.price < 0) throw malformed();
+    if (day.currency !== undefined && day.currency !== null && day.currency !== currency) throw malformed();
+    const amount = minor(day.price, digits);
+    if (amount === null) throw malformed();
+    return {date: day.date, amount: amount / 10 ** digits};
+  }).sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (rows.some((row, i) => row.date !== nights[i])) throw malformed();
+  return rows;
+}
+
+// Names of the taxes already inside an invoice line (invoiceItems[].includedTaxesList[].title,
+// changelog 2026-02-15). They are labels only: the line's amount already holds them.
+function includedTaxes(list) {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list)) throw malformed();
+  const names = list.map(tax => (tax && typeof tax.title === 'string' && tax.title.trim() ? tax.title.trim().slice(0, 80) : 'tax'));
+  return [...new Set(names)];
 }
 
 // One rate plan's quote. The total shown is the plan's money.hostPayout, which the Reservation Quote
 // Flow names "the total amount the guest will be charged for their stay", in money.currency. The
 // invoice lines are shown only when they add up to it exactly, at the currency's precision.
-function planQuote(entry) {
+function planQuote(entry, stay) {
   const parts = planParts(entry);
-  if (!parts) throw new GuestyUnavailable('quote_malformed');
+  if (!parts) throw malformed();
   const {money: detail, name} = parts;
   const currency = detail.currency;
   const digits = typeof currency === 'string' && /^[A-Z]{3}$/.test(currency) ? precision(currency) : null;
-  if (digits === null) throw new GuestyUnavailable('quote_malformed');
-  if (!money(detail.hostPayout) || detail.hostPayout <= 0) throw new GuestyUnavailable('quote_malformed');
+  if (digits === null) throw malformed();
+  if (!money(detail.hostPayout) || detail.hostPayout <= 0) throw malformed();
   const total = minor(detail.hostPayout, digits);
   const items = detail.invoiceItems;
-  if (total === null || !Array.isArray(items) || items.length === 0) throw new GuestyUnavailable('quote_malformed');
+  if (total === null || !Array.isArray(items) || items.length === 0) throw malformed();
   const lines = [];
   let sum = 0;
   for (const item of items) {
-    if (!item || typeof item.title !== 'string' || !item.title.trim() || !money(item.amount)) throw new GuestyUnavailable('quote_malformed');
-    if (item.currency !== undefined && item.currency !== currency) throw new GuestyUnavailable('quote_malformed');
+    if (!item || typeof item.title !== 'string' || !item.title.trim() || !money(item.amount)) throw malformed();
+    if (item.currency !== undefined && item.currency !== currency) throw malformed();
     const amount = minor(item.amount, digits);
     if (amount === null) throw new GuestyUnavailable('quote_total_mismatch');
     sum += amount;
-    lines.push({title: item.title.trim().slice(0, 80), amount: amount / 10 ** digits});
+    const line = {title: item.title.trim().slice(0, 80), amount: amount / 10 ** digits};
+    const included = includedTaxes(item.includedTaxesList);
+    if (included.length) line.included = included;
+    lines.push(line);
   }
   if (sum !== total) throw new GuestyUnavailable('quote_total_mismatch');
-  return {currency, lines, total: total / 10 ** digits, minorTotal: total, ratePlan: name};
+  const nightly = nightlyRates(parts.days, currency, digits, stay);
+  return {currency, lines, nightly, total: total / 10 ** digits, minorTotal: total, ratePlan: name};
 }
 
-export function mapQuote(body) {
+// stay: {checkIn, checkOut}, the requested dates, used to check the plan's nightly rows.
+export function mapQuote(body, stay) {
   const plans = body && body.rates && Array.isArray(body.rates.ratePlans) ? body.rates.ratePlans : null;
-  if (!plans || plans.length === 0) throw new GuestyUnavailable('quote_malformed');
+  if (!plans || plans.length === 0) throw malformed();
+  // Guesty's quote holds its prices until expiresAt (required in the schema; the flow guide: 24 hours).
+  const expiresAt = typeof body.expiresAt === 'string' ? Date.parse(body.expiresAt) : NaN;
+  if (!Number.isFinite(expiresAt)) throw malformed();
   // Any plan that cannot be read makes the quote ambiguous: refuse it rather than pick among the rest.
-  const quotes = plans.map(planQuote);
+  const quotes = plans.map(plan => planQuote(plan, stay));
   if (new Set(quotes.map(q => q.currency)).size > 1) throw new GuestyUnavailable('quote_currency_mismatch');
   // Several rate plans: show the lowest guest charge and name its plan (open question for Hank).
   quotes.sort((a, b) => a.minorTotal - b.minorTotal);
   const {minorTotal, ...best} = quotes[0];
-  return {...best, ratePlan: quotes.length > 1 ? best.ratePlan : ''};
+  // Among several plans, an unnamed one cannot be told apart from the others (refundable or not):
+  // refuse rather than show its price without saying which offer it is.
+  if (quotes.length > 1 && !best.ratePlan) throw new GuestyUnavailable('quote_ambiguous');
+  return {...best, ratePlan: quotes.length > 1 ? best.ratePlan : '', expiresAt};
 }
 
-function respond(status, body, cacheable) {
+// How long a quote may be cached and shown, from Guesty's expiresAt and the server clock.
+// The CDN keeps it at most QUOTE_CDN_FRESH + QUOTE_CDN_STALE seconds, never past the expiry less a
+// margin, and the reply tells the browser how many seconds it may show the price after receiving it
+// (validFor), already less the longest time the reply may have sat in the CDN. A relative figure,
+// so a wrong clock on the guest's device cannot stretch it. null: too close to expiry to show.
+export const QUOTE_EXPIRY_MARGIN = 60;
+export const QUOTE_MIN_SHOW = 60;
+const QUOTE_CDN_FRESH = 300;
+const QUOTE_CDN_STALE = 300;
+export function quoteLifetime(expiresAt, now) {
+  const usable = Math.floor((expiresAt - now) / 1000) - QUOTE_EXPIRY_MARGIN;
+  if (!(usable >= QUOTE_MIN_SHOW)) return null;
+  const cached = Math.min(QUOTE_CDN_FRESH + QUOTE_CDN_STALE, usable - QUOTE_MIN_SHOW);
+  const sMaxAge = Math.min(QUOTE_CDN_FRESH, cached);
+  return {sMaxAge, staleWhileRevalidate: cached - sMaxAge, validFor: usable - cached};
+}
+
+// cache: null (no-store) or {sMaxAge, staleWhileRevalidate, vary}.
+function respond(status, body, cache) {
   const headers = {'content-type': 'application/json; charset=utf-8', 'x-robots-tag': 'noindex'};
-  if (cacheable) {
+  if (cache && cache.sMaxAge > 0) {
     headers['cache-control'] = 'public, max-age=0, must-revalidate';
-    headers['netlify-cdn-cache-control'] = 'public, durable, s-maxage=300, stale-while-revalidate=300';
-    if (cacheable !== true) headers['netlify-vary'] = cacheable;
+    headers['netlify-cdn-cache-control'] = `public, durable, s-maxage=${cache.sMaxAge}`
+      + (cache.staleWhileRevalidate > 0 ? `, stale-while-revalidate=${cache.staleWhileRevalidate}` : '');
+    if (cache.vary) headers['netlify-vary'] = cache.vary;
   } else {
     headers['cache-control'] = 'no-store';
   }
@@ -145,9 +214,11 @@ function respond(status, body, cacheable) {
 
 const failure = error => {
   const status = error instanceof GuestyUnavailable ? error.status : 'error';
-  const code = status === 'not_configured' ? 503 : /^(token_backoff|token_busy|token_allowance|rate_limited)$/.test(status) ? 503 : 502;
+  const code = status === 'not_configured' ? 503 : /^(token_backoff|token_busy|token_allowance|token_hold|rate_limited)$/.test(status) ? 503 : 502;
   return {status, code};
 };
+
+const CALENDAR_CACHE = {sMaxAge: 300, staleWhileRevalidate: 300};
 
 /**
  * deps: {env, store, fetch, now, log, memo, stays, listings, timeoutMs}
@@ -159,7 +230,7 @@ export async function calendarResponse(slug, deps) {
   const log = status => deps.log(JSON.stringify({fn: 'calendar', listing: listingId, from, to, status}));
   if (!stay || !listingId) {
     log(stay ? 'unmapped' : 'unknown_stay');
-    return respond(404, {ok: false}, false);
+    return respond(404, {ok: false}, null);
   }
   try {
     const guesty = createGuesty({clientId: deps.env.GUESTY_BE_CLIENT_ID, clientSecret: deps.env.GUESTY_BE_CLIENT_SECRET,
@@ -167,11 +238,11 @@ export async function calendarResponse(slug, deps) {
     const body = await guesty.get(`/api/listings/${encodeURIComponent(listingId)}/calendar?from=${from}&to=${to}`);
     const days = mapCalendar(body, from, to);
     log('ok');
-    return respond(200, {ok: true, from, to, days}, true);
+    return respond(200, {ok: true, from, to, days}, CALENDAR_CACHE);
   } catch (error) {
     const {status, code} = failure(error);
     log(status);
-    return respond(code, {ok: false}, false);
+    return respond(code, {ok: false}, null);
   }
 }
 
@@ -185,7 +256,7 @@ export async function quoteResponse(slug, params, deps) {
     checkIn: datesValid ? checkIn : null, checkOut: datesValid ? checkOut : null, status}));
   if (!stay || !listingId) {
     log(stay ? 'unmapped' : 'unknown_stay');
-    return respond(404, {ok: false}, false);
+    return respond(404, {ok: false}, null);
   }
   const first = today(deps.now());
   const nights = datesValid ? daysBetween(checkIn, checkOut) : 0;
@@ -193,7 +264,7 @@ export async function quoteResponse(slug, params, deps) {
   if (!datesValid || checkIn < first || daysBetween(first, checkOut) > MAX_DAYS_AHEAD || nights < 1 || nights > MAX_NIGHTS
     || !Number.isInteger(guests) || guests < 1 || guests > stay.guests) {
     log('bad_request');
-    return respond(400, {ok: false}, false);
+    return respond(400, {ok: false}, null);
   }
   try {
     const guesty = createGuesty({clientId: deps.env.GUESTY_BE_CLIENT_ID, clientSecret: deps.env.GUESTY_BE_CLIENT_SECRET,
@@ -201,12 +272,15 @@ export async function quoteResponse(slug, params, deps) {
     const body = await guesty.post('/api/reservations/quotes', {
       listingId, checkInDateLocalized: checkIn, checkOutDateLocalized: checkOut, guestsCount: guests
     });
-    const quote = mapQuote(body);
+    const {expiresAt, ...quote} = mapQuote(body, {checkIn, checkOut});
+    const lifetime = quoteLifetime(expiresAt, deps.now());
+    if (!lifetime) throw new GuestyUnavailable('quote_expired');
     log('ok');
-    return respond(200, {ok: true, checkIn, checkOut, nights, guests, ...quote}, 'query=checkIn|checkOut|guests');
+    return respond(200, {ok: true, checkIn, checkOut, nights, guests, ...quote, validFor: lifetime.validFor},
+      {sMaxAge: lifetime.sMaxAge, staleWhileRevalidate: lifetime.staleWhileRevalidate, vary: 'query=checkIn|checkOut|guests'});
   } catch (error) {
     const {status, code} = failure(error);
     log(status);
-    return respond(code, {ok: false}, false);
+    return respond(code, {ok: false}, null);
   }
 }

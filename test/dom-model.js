@@ -155,18 +155,37 @@ export function builtPage(slug, {fetch, html} = {}) {
   const start = source.indexOf('<aside class="booking-panel"');
   const end = source.indexOf('</aside>', start) + '</aside>'.length;
   if (start < 0) throw new Error('no booking panel in ' + slug);
-  const doc = {activeElement: null, navigations: []};
+  const doc = {activeElement: null, navigations: [], visibilityState: 'visible'};
   const root = parse(source.slice(start, end), doc);
   const windowListeners = {};
+  const documentListeners = {};
   let idle = null;
   const requested = [];
   Object.assign(doc, {
     querySelector: s => root.querySelector(s),
     querySelectorAll: s => root.querySelectorAll(s),
-    createElement: tag => new Element(tag, doc)
+    createElement: tag => new Element(tag, doc),
+    addEventListener: (type, fn) => { (documentListeners[type] ||= []).push(fn); },
+    dispatchEvent: event => { for (const fn of documentListeners[event.type] || []) fn(event); return true; }
   });
+  // The page's clock: real time plus an offset the test can advance. Timers longer than a minute
+  // (a quote's expiry) are held here and fire only when advance() passes them, so a test never
+  // waits on, or is kept alive by, a real long timer.
+  const clock = {offset: 0, timers: new Map(), next: 1};
+  const RealDate = Date;
+  class PageDate extends RealDate {
+    constructor(...args) { if (args.length) super(...args); else super(RealDate.now() + clock.offset); }
+    static now() { return RealDate.now() + clock.offset; }
+  }
+  const pageSetTimeout = (fn, ms = 0) => {
+    if (ms <= 60e3) return setTimeout(fn, ms);
+    const id = 'long-' + clock.next++;
+    clock.timers.set(id, {fn, due: PageDate.now() + ms, ms});
+    return id;
+  };
+  const pageClearTimeout = id => { if (clock.timers.has(id)) clock.timers.delete(id); else clearTimeout(id); };
   const ctx = {
-    document: doc, Event, URLSearchParams, Intl, AbortController, setTimeout, clearTimeout, Promise, Date,
+    document: doc, Event, URLSearchParams, Intl, AbortController, setTimeout: pageSetTimeout, clearTimeout: pageClearTimeout, Promise, Date: PageDate,
     navigator: {},
     matchMedia: () => ({matches: false, addEventListener() {}}),
     requestIdleCallback: fn => { idle = fn; },
@@ -187,6 +206,18 @@ export function builtPage(slug, {fetch, html} = {}) {
     day: value => root.querySelector(`[data-day="${value}"]`),
     // Run the idle callback that loads the calendar (live pages only).
     idle: () => { const fn = idle; idle = null; if (fn) fn(); return Boolean(fn); },
+    // Move the page's clock forward. fireTimers: false models a sleeping device or a page in the
+    // back/forward cache, where held timers have not run.
+    advance: async (ms, {fireTimers = true} = {}) => {
+      clock.offset += ms;
+      if (fireTimers) {
+        for (const [id, timer] of [...clock.timers]) if (timer.due <= PageDate.now()) { clock.timers.delete(id); timer.fn(); }
+      }
+      await settle();
+    },
+    longTimers: () => [...clock.timers.values()].map(t => t.ms),
+    fireWindow: async type => { ctx.dispatchEvent(new Event(type)); await settle(); },
+    fireDocument: async type => { doc.dispatchEvent(new Event(type)); await settle(); },
     choose: async (checkIn, checkOut, adults) => {
       form.elements.check_in.value = checkIn;
       form.elements.check_out.value = checkOut;

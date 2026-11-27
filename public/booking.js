@@ -141,10 +141,19 @@ function setupBooking() {
   });
   desktop.addEventListener('change', () => { if (dialog.open) { render(); focusDay(); } });
   // Live availability (public/live-booking.js) can arrive while the calendar is open: redraw it in
-  // place, keeping focus on the same day when focus was on a day.
+  // place, keeping focus on the same day when focus was on a day. A check-in picked before the data
+  // arrived is checked again: if it is now closed, the picker goes back to choosing check-in, with
+  // focus on that day.
   window.addEventListener('staylive', () => {
     if (!dialog.open) return;
     const onDay = months.contains(document.activeElement);
+    const pending = start;
+    if (pending && window.stayLive?.dayState(pending, '').blocked) {
+      start = '';
+      showDate(pending);
+      prompt.textContent = `Check-in is not available on ${label(parse(pending))}. Choose check-in.`;
+      return;
+    }
     render();
     if (onDay) focusDay();
   });

@@ -68,6 +68,8 @@ function mappedBuild(listings) {
 }
 const emptyMap = Object.fromEntries(stays.map(s => [s.slug, '']));
 const mapped = mappedBuild({...emptyMap, 'lunar-dome': 'aaaaaa111111'});
+// An explicitly empty map, whatever data/guesty-listings.json holds when the suite runs.
+const unmapped = mappedBuild(emptyMap);
 
 const D = localDay;
 const reply = body => Promise.resolve({ok: true, json: () => Promise.resolve(body)});
@@ -75,8 +77,18 @@ const calendar = {ok: true, from: D(0), to: D(364), days: [
   {date: D(10), available: true, minNights: 2, noArrival: false, noDeparture: false},
   {date: D(11), available: true, minNights: 2, noArrival: false, noDeparture: false},
   {date: D(12), available: false, minNights: 2, noArrival: false, noDeparture: false}]};
-const quoteFor = (checkIn, checkOut) => ({ok: true, checkIn, checkOut, nights: 2, guests: 2, currency: 'USD', ratePlan: '',
-  lines: [{title: 'Accommodation fare', amount: 400}, {title: 'Cleaning fee', amount: 95}, {title: 'Hotel occupancy tax', amount: 49.5}], total: 544.5});
+const DAY_S = 86400;
+// What the quote function sends: the stay and party it was asked for, echoed.
+const quoteFor = (checkIn, checkOut, guests, extra = {}) => ({ok: true, checkIn, checkOut, nights: 2, guests: Number(guests), currency: 'USD', ratePlan: '',
+  nightly: [{date: checkIn, amount: 180}, {date: D(11), amount: 220}],
+  lines: [{title: 'Accommodation fare', amount: 400, included: ['Local tax']}, {title: 'Cleaning fee', amount: 95}, {title: 'Hotel occupancy tax', amount: 49.5}],
+  total: 544.5, validFor: DAY_S - 720, ...extra});
+const query = url => Object.fromEntries(new URLSearchParams(url.split('?')[1]));
+const echo = (extra = {}) => url => {
+  if (url.endsWith('/calendar')) return reply(calendar);
+  const q = query(url);
+  return reply(quoteFor(q.checkIn, q.checkOut, q.guests, typeof extra === 'function' ? extra(q) : extra));
+};
 
 // The Book form must hand off to this stay's Airbnb room with the guest's dates and adults.
 function assertAirbnbHandoff(p, checkIn, checkOut, adults) {
@@ -97,8 +109,7 @@ test('only the mapped stay carries the live script; the rest of the mapped build
 });
 
 test('built page, quote success: Guesty\'s lines and total show, and Book submits the Airbnb form with the dates', async () => {
-  const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: url =>
-    reply(url.endsWith('/calendar') ? calendar : quoteFor(new URLSearchParams(url.split('?')[1]).get('checkIn'), new URLSearchParams(url.split('?')[1]).get('checkOut')))});
+  const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: echo()});
   assert.ok(p.idle());
   await p.settle();
   assert.deepEqual(p.requested, ['/api/stays/lunar-dome/calendar']);
@@ -108,11 +119,85 @@ test('built page, quote success: Guesty\'s lines and total show, and Book submit
   await p.choose(D(10), D(12), '1');
   assert.equal(p.requested[1], `/api/stays/lunar-dome/quote?checkIn=${D(10)}&checkOut=${D(12)}&guests=1`);
   const shown = p.box().textContent;
-  for (const expected of ['Accommodation fare', '$400.00', 'Cleaning fee', '$95.00', 'Hotel occupancy tax', '$49.50', 'Total for 2 nights', '$544.50', 'finish booking on Airbnb']) {
+  for (const expected of ['Cleaning fee', '$95.00', 'Hotel occupancy tax', '$49.50', 'Total for 2 nights', '$544.50', 'finish booking on Airbnb']) {
     assert.ok(shown.includes(expected), expected);
   }
+  // The included tax is named beside its line, and the line keeps its own amount.
+  const fare = p.box().querySelectorAll('div').find(row => row.textContent.startsWith('Accommodation fare'));
+  assert.equal(fare.textContent, 'Accommodation fare (includes Local tax)$400.00');
+  // Guesty's nightly prices are listed by date, apart from the lines and the total.
+  const nights = p.box().querySelector('dl.live-nights');
+  assert.deepEqual(nights.children.map(row => row.children[1].textContent), ['$180.00', '$220.00']);
+  assert.equal(nights.children.length, 2);
+  assert.equal(p.box().querySelectorAll('div').filter(row => row.classList.contains('live-total')).length, 1);
   assert.equal(p.box().hidden, false);
   assertAirbnbHandoff(p, D(10), D(12), '1');
+});
+
+test('built page: a quote for another party than the one chosen is never shown, and Book still hands off', async () => {
+  // A reply for 2 guests when 1 adult is chosen (a stale or mismatched reply).
+  const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: echo({guests: 2})});
+  p.idle();
+  await p.settle();
+  await p.choose(D(10), D(12), '1');
+  assert.equal(p.requested.length, 2);
+  assert.equal(p.box().hidden, true);
+  assert.equal(p.box().textContent, '');
+  assertAirbnbHandoff(p, D(10), D(12), '1');
+  // A reply for the right party but another stay length, or with no validity, is not shown either.
+  for (const extra of [{nights: 3}, {validFor: 0}, {validFor: undefined}]) {
+    const other = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: echo(extra)});
+    other.idle();
+    await other.settle();
+    await other.choose(D(10), D(12), '2');
+    assert.equal(other.box().hidden, true, JSON.stringify(extra));
+  }
+});
+
+test('built page: an expired price is taken down on return to the page and asked for again', async () => {
+  let price = 305;
+  let fail = false;
+  const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: url => {
+    if (url.endsWith('/calendar')) return reply(calendar);
+    if (fail) return Promise.resolve({ok: false, json: () => Promise.resolve({ok: false})});
+    const q = query(url);
+    return reply(quoteFor(q.checkIn, q.checkOut, q.guests, {nightly: [], lines: [{title: 'Accommodation fare', amount: price}], total: price}));
+  }});
+  p.idle();
+  await p.settle();
+  await p.choose(D(10), D(12), '2');
+  assert.match(p.box().textContent, /\$305\.00/);
+  assert.deepEqual(p.longTimers(), [(DAY_S - 720) * 1000]);                 // the expiry is scheduled
+  // The device sleeps 25 hours (no timer runs), then the page is restored from the back/forward cache.
+  price = 405;
+  await p.advance(25 * 3600e3, {fireTimers: false});
+  assert.match(p.box().textContent, /\$305\.00/);                           // nothing has run yet
+  await p.fireWindow('pageshow');
+  assert.equal(p.requested.length, 3, 'a new quote was requested');
+  assert.match(p.box().textContent, /\$405\.00/);
+  assert.doesNotMatch(p.box().textContent, /\$305/);
+  // Expiry by the timer, and a refresh that fails: the old price is hidden, Book still hands off.
+  fail = true;
+  await p.advance((DAY_S - 720) * 1000);
+  assert.equal(p.requested.length, 4);
+  assert.equal(p.box().hidden, true);
+  assert.equal(p.box().textContent, '');
+  assertAirbnbHandoff(p, D(10), D(12), '2');
+});
+
+test('built page: a price still within its hold stays on return, and an expired one goes when the tab is shown', async () => {
+  const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: echo({validFor: 600})});
+  p.idle();
+  await p.settle();
+  await p.choose(D(10), D(12), '2');
+  await p.advance(300e3, {fireTimers: false});
+  await p.fireWindow('pageshow');
+  await p.fireDocument('visibilitychange');
+  assert.equal(p.requested.length, 2);                                       // still valid: no new request
+  assert.match(p.box().textContent, /\$544\.50/);
+  await p.advance(301e3, {fireTimers: false});
+  await p.fireDocument('visibilitychange');
+  assert.equal(p.requested.length, 3);
 });
 
 test('built page, calendar failure: no live state, no quote request, and Book still submits to Airbnb', async () => {
@@ -164,6 +249,44 @@ test('built page: availability that arrives while the picker is open redraws it,
   assert.equal(p.form.elements.check_in.value, '');
 });
 
+test('built page: a check-in picked before availability arrived, and then found booked, sends the picker back to check-in', async () => {
+  let deliver;
+  const booked = {ok: true, from: D(0), to: D(364), days: [{date: D(10), available: false, minNights: 1, noArrival: false, noDeparture: false}]};
+  const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: url =>
+    (url.endsWith('/calendar') ? new Promise(resolve => { deliver = () => resolve({ok: true, json: () => Promise.resolve(booked)}); }) : reply({ok: false}))});
+  const prompt = () => p.root.querySelector('[data-calendar-prompt]').textContent;
+  p.root.querySelector('[data-calendar-open]').click();
+  // The picker opens on this month; page forward when day 10 falls in the next one.
+  if (!p.day(D(10))) p.root.querySelector('[data-month="1"]').click();
+  p.day(D(10)).click();                                                      // tentative check-in, data still loading
+  assert.match(prompt(), /Choose check-out/);
+  p.idle();
+  deliver();
+  await p.settle();
+  assert.match(prompt(), /not available.*Choose check-in\.$/);
+  assert.doesNotMatch(prompt(), /Choose check-out/);
+  assert.equal(p.doc.activeElement, p.day(D(10)));                          // focus back on that day, now marked
+  assert.equal(p.day(D(10)).getAttribute('aria-disabled'), 'true');
+  // A later day is a check-in again, not a check-out against the booked arrival.
+  assert.equal(p.day(D(11)).getAttribute('aria-disabled'), null);
+  p.day(D(11)).click();
+  assert.match(prompt(), /Check-in .*Choose check-out/);
+  p.day(D(13)).click();
+  assert.equal(p.form.elements.check_in.value, D(11));
+  assert.equal(p.form.elements.check_out.value, D(13));
+  // Still valid after the data arrives: the choice is kept.
+  let again;
+  const q = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: url =>
+    (url.endsWith('/calendar') ? new Promise(resolve => { again = () => resolve({ok: true, json: () => Promise.resolve(booked)}); }) : reply({ok: false}))});
+  q.root.querySelector('[data-calendar-open]').click();
+  if (!q.day(D(11))) q.root.querySelector('[data-month="1"]').click();
+  q.day(D(11)).click();
+  q.idle();
+  again();
+  await q.settle();
+  assert.match(q.root.querySelector('[data-calendar-prompt]').textContent, /Choose check-out/);
+});
+
 test('built page: a click is checked against the current rule, even on a day drawn before the rule arrived', async () => {
   const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: () => new Promise(() => {})});
   p.root.querySelector('[data-calendar-open]').click();
@@ -175,15 +298,23 @@ test('built page: a click is checked against the current rule, even on a day dra
   assert.match(p.root.querySelector('[data-calendar-prompt]').textContent, /^Choose check-in/);
 });
 
-test('an unmapped stay page is exactly today\'s Airbnb handoff', async () => {
+test('the configured build carries the live script exactly on the stays the checked-in map fills', () => {
   for (const stay of stays) {
     const html = read('dist/stays/' + stay.slug + '/index.html');
-    assert.equal(html.includes('data-live='), Boolean(map[stay.slug]));
-    assert.equal(html.includes('/live-booking.js'), Boolean(map[stay.slug]));
+    assert.equal(html.includes('data-live='), Boolean(map[stay.slug]), stay.slug);
+    assert.equal(html.includes('/live-booking.js'), Boolean(map[stay.slug]), stay.slug);
+  }
+});
+
+test('an unmapped stay page is exactly today\'s Airbnb handoff', async () => {
+  // Built from an explicitly empty map, so the test holds however many stays the real map fills.
+  for (const stay of stays) {
+    assert.ok(!unmapped[stay.slug].includes('data-live='), stay.slug);
+    assert.ok(!unmapped[stay.slug].includes('/live-booking.js'), stay.slug);
   }
   assert.match(bookingPanel({...lunar, live: true}), /<aside class="booking-panel" id="availability" aria-labelledby="booking-title" data-live="\/api\/stays\/lunar-dome">/);
   assert.doesNotMatch(bookingPanel(lunar), /data-live/);
-  const p = builtPage('lunar-dome', {fetch: () => { throw new Error('an unmapped page must not fetch'); }});
+  const p = builtPage('lunar-dome', {html: unmapped['lunar-dome'], fetch: () => { throw new Error('an unmapped page must not fetch'); }});
   assert.deepEqual(p.scripts, ['booking.js']);
   await p.choose(D(10), D(12));
   assert.deepEqual(p.requested, []);

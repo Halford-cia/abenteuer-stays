@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { createGuesty, tokenBackoffMs, GuestyUnavailable, TOKEN_URL, TOKEN_ALLOWANCE, sealKey, openToken } from '../netlify/lib/guesty.js';
-import { calendarResponse, quoteResponse, mapQuote, mapCalendar, resolveStay, today, addDays } from '../netlify/lib/stay-api.js';
-import { suggest, listAllListings, MAX_PAGES } from '../scripts/guesty-listings.mjs';
+import { createGuesty, tokenBackoffMs, GuestyUnavailable, TOKEN_ALLOWANCE, sealKey, openToken } from '../netlify/lib/guesty.js';
+import { calendarResponse, quoteResponse, mapQuote, mapCalendar, quoteLifetime, resolveStay, today, addDays } from '../netlify/lib/stay-api.js';
+import { suggest, listAllListings, requestOwnerToken, MAX_PAGES } from '../scripts/guesty-listings.mjs';
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 const stays = JSON.parse(read('data/stays.json'));
@@ -12,13 +12,19 @@ const CLIENT = 'client-id';
 const SECRET = 'client-secret-value';
 const TOKEN = 'issued-token-value';
 const NOW = Date.parse('2026-12-01T18:00:00Z');
+// The documented addresses, written out here rather than imported, so a wrong address in the code
+// fails these tests (Authentication page; API reference, server https://booking.guesty.com).
+const TOKEN_URL = 'https://booking.guesty.com/oauth2/token';
 const QUOTE_URL = 'https://booking.guesty.com/api/reservations/quotes';
 const CALENDAR_URL = `https://booking.guesty.com/api/listings/${LISTING}/calendar?from=2026-12-01&to=2027-11-30`;
 
 // In-memory stand-in for a Netlify Blobs store, with ETags and conditional writes.
 // failWrites: keys whose writes throw, as a failing Blobs write would.
-function memoryStore({failWrites = []} = {}) {
+// faults: {key: n => 'throw' | 'reject' | undefined} decides the n-th write (from 1) of a key:
+// throw as a failing Blobs write does, or come back {modified: false} as a lost conditional write does.
+function memoryStore({failWrites = [], faults = {}} = {}) {
   const data = new Map();
+  const writes = {};
   let version = 0;
   return {
     data,
@@ -28,6 +34,10 @@ function memoryStore({failWrites = []} = {}) {
     },
     async setJSON(key, value, options = {}) {
       if (failWrites.includes(key)) throw new Error('blobs write failed');
+      writes[key] = (writes[key] || 0) + 1;
+      const fault = faults[key] && faults[key](writes[key]);
+      if (fault === 'throw') throw new Error('blobs write failed');
+      if (fault === 'reject') return {modified: false};
       const current = data.get(key);
       if (options.onlyIfNew && current) return {modified: false};
       if (options.onlyIfMatch && (!current || current.etag !== options.onlyIfMatch)) return {modified: false};
@@ -44,7 +54,9 @@ const json = (status, body, headers = {}) => new Response(body === undefined ? n
 const schemaPlan = (name, items, extra = {}) => ({ratePlan: {_id: 'rp-' + name, name, money: {currency: 'USD', invoiceItems: items, ...extra}}});
 // A plan in the Reservation Quote Flow example's layout: name and money on ratePlans[] itself.
 const flowPlan = (name, items, extra = {}) => ({name, days: [], money: {currency: 'USD', invoiceItems: items, ...extra}});
-const quoteWith = (...ratePlans) => ({_id: 'q1', createdAt: '2026-12-01T00:00:00Z', expiresAt: '2026-12-02T00:00:00Z', promotions: {}, coupons: [], rates: {ratePlans}});
+// Guesty holds a quote's prices for 24 hours (Reservation Quote Flow); expiresAt is required.
+const EXPIRES = new Date(NOW + 86400e3).toISOString();
+const quoteWith = (...ratePlans) => ({_id: 'q1', createdAt: new Date(NOW).toISOString(), expiresAt: EXPIRES, promotions: {}, coupons: [], rates: {ratePlans}});
 const quoteBody = (items, extra = {}) => quoteWith(schemaPlan('Standard', items, extra));
 const standardItems = [
   {title: 'Accommodation fare', amount: 600, currency: 'USD', type: 'ACCOMMODATION_FARE'},
@@ -80,6 +92,19 @@ function deps(guesty, overrides = {}) {
     ...overrides
   };
 }
+// The documented token request (Authentication page): POST to the token URL, form-encoded, with
+// exactly grant_type, scope, client_id and client_secret.
+function assertTokenRequest(call, clientId = CLIENT, clientSecret = SECRET) {
+  assert.equal(call.href, 'https://booking.guesty.com/oauth2/token');
+  assert.equal(call.init.method, 'POST');
+  assert.equal(call.init.headers['content-type'], 'application/x-www-form-urlencoded');
+  assert.equal(call.init.headers.accept, 'application/json');
+  assert.ok(call.init.body instanceof URLSearchParams, 'the body is form-encoded');
+  assert.deepEqual([...call.init.body].sort(), [
+    ['client_id', clientId], ['client_secret', clientSecret], ['grant_type', 'client_credentials'], ['scope', 'booking_engine:api']]);
+  assert.equal(String(call.init.body), new URLSearchParams([['grant_type', 'client_credentials'], ['scope', 'booking_engine:api'],
+    ['client_id', clientId], ['client_secret', clientSecret]]).toString());
+}
 const params = query => new URLSearchParams(query);
 const goodQuery = {checkIn: '2026-12-10', checkOut: '2026-12-13', guests: '2'};
 const statuses = d => d.lines.map(line => JSON.parse(line).status);
@@ -93,9 +118,7 @@ test('the token is requested once and reused across calls, instances and until i
   // A cold instance (empty memo) reads the shared store instead of asking Guesty.
   await calendarResponse('lunar-dome', {...d, memo: {}});
   assert.equal(guesty.tokenCalls(), 1);
-  const sent = new URLSearchParams(guesty.calls[0].init.body);
-  assert.equal(sent.get('grant_type'), 'client_credentials');
-  assert.equal(sent.get('scope'), 'booking_engine:api');
+  assertTokenRequest(guesty.calls[0]);
   const api = guesty.calls.find(c => c.href.includes('/calendar'));
   assert.equal(api.init.headers.authorization, 'Bearer ' + TOKEN);
   // 23 h 56 min later the token is within five minutes of expiry, the gap has passed: renew once.
@@ -323,11 +346,11 @@ test('the quote shows Guesty\'s guest charge (hostPayout) and lines, and sends n
   const body = await res.json();
   assert.deepEqual(body, {ok: true, checkIn: '2026-12-10', checkOut: '2026-12-13', nights: 3, guests: 2, currency: 'USD',
     lines: [{title: 'Accommodation fare', amount: 600}, {title: 'Cleaning fee', amount: 95}, {title: 'Hotel occupancy tax', amount: 69.5}],
-    total: 764.5, ratePlan: ''});
+    nightly: [], total: 764.5, ratePlan: '', validFor: 86400 - 60 - 600});
   const sent = JSON.parse(guesty.calls.find(c => c.href === QUOTE_URL).init.body);
   assert.deepEqual(sent, {listingId: LISTING, checkInDateLocalized: '2026-12-10', checkOutDateLocalized: '2026-12-13', guestsCount: 2});
   assert.equal(guesty.calls.find(c => c.href === QUOTE_URL).init.method, 'POST');
-  assert.match(res.headers.get('netlify-cdn-cache-control'), /s-maxage=300/);
+  assert.equal(res.headers.get('netlify-cdn-cache-control'), 'public, durable, s-maxage=300, stale-while-revalidate=300');
   assert.equal(res.headers.get('netlify-vary'), 'query=checkIn|checkOut|guests');
 });
 
@@ -361,7 +384,7 @@ test('quote mapping refuses rather than showing a total that differs from the gu
 test('both documented plan layouts keep each plan\'s own name, currency and invoice', () => {
   const flexible = [{title: 'Fare', amount: 500, currency: 'USD'}];
   const nonRefundable = [{title: 'Fare', amount: 450, currency: 'USD'}];
-  const expected = {currency: 'USD', lines: [{title: 'Fare', amount: 450}], total: 450, ratePlan: 'Non-refundable'};
+  const expected = {currency: 'USD', lines: [{title: 'Fare', amount: 450}], nightly: [], total: 450, ratePlan: 'Non-refundable', expiresAt: Date.parse(EXPIRES)};
   // Reservation Quote Flow example: name and money directly on each ratePlans[] entry.
   assert.deepEqual(mapQuote(quoteWith(flowPlan('Flexible', flexible, {hostPayout: 500}), flowPlan('Non-refundable', nonRefundable, {hostPayout: 450}))), expected);
   // OpenAPI schema: both inside ratePlans[].ratePlan.
@@ -518,4 +541,274 @@ test('the owner script reads every listing page, and refuses a reply that would 
   seen.length = 0;
   await assert.rejects(listAllListings(listingsFetch({results: [], pagination: {cursor: {next: 'more'}}}), 't'), /incomplete/);
   assert.equal(seen.length, MAX_PAGES);
+});
+
+// ---- Round 2 (review 441r2b) ----
+
+// Blocker 1: a quote's price lives only as long as Guesty holds it.
+test('the quote carries its expiry: the CDN never keeps it past expiresAt, and the browser is told how long to show it', async () => {
+  const at = expiresIn => ({...quoteBody(standardItems, standardMoney), expiresAt: new Date(NOW + expiresIn * 1000).toISOString()});
+  const run = async body => {
+    const guesty = fakeGuesty([[TOKEN_URL, tokenOk], [QUOTE_URL, () => json(200, body)]]);
+    const d = deps(guesty);
+    const res = await quoteResponse('lunar-dome', params(goodQuery), d);
+    return {res, body: await res.json(), d};
+  };
+  // 24 hours: five minutes fresh and five stale in the CDN; the browser may show it for the rest,
+  // less a minute's margin and the longest time the reply may have sat in the CDN.
+  let r = await run(at(86400));
+  assert.equal(r.res.headers.get('netlify-cdn-cache-control'), 'public, durable, s-maxage=300, stale-while-revalidate=300');
+  assert.equal(r.body.validFor, 86400 - 60 - 600);
+  assert.ok(!('expiresAt' in r.body));
+  // Ten minutes left: cached for less, and CDN age plus display time never pass the expiry.
+  r = await run(at(600));
+  assert.equal(r.res.headers.get('netlify-cdn-cache-control'), 'public, durable, s-maxage=300, stale-while-revalidate=180');
+  assert.equal(r.body.validFor, 60);
+  assert.ok(300 + 180 + r.body.validFor <= 600 - 60);
+  // Three minutes left: a minute in the CDN, a minute on screen.
+  r = await run(at(180));
+  assert.equal(r.res.headers.get('netlify-cdn-cache-control'), 'public, durable, s-maxage=60');
+  assert.equal(r.body.validFor, 60);
+  // Two minutes left: shown for a minute, not cached at all.
+  r = await run(at(120));
+  assert.equal(r.res.headers.get('cache-control'), 'no-store');
+  assert.equal(r.res.headers.get('netlify-cdn-cache-control'), null);
+  assert.equal(r.body.validFor, 60);
+  // Too close to expiry, already expired, or no expiry: no price, the uncached fallback.
+  for (const [body, status] of [[at(90), 'quote_expired'], [at(-60), 'quote_expired'],
+    [{...quoteBody(standardItems, standardMoney), expiresAt: undefined}, 'quote_malformed'],
+    [{...quoteBody(standardItems, standardMoney), expiresAt: 'tomorrow'}, 'quote_malformed']]) {
+    r = await run(body);
+    assert.equal(r.res.status, 502, status);
+    assert.equal(r.res.headers.get('cache-control'), 'no-store', status);
+    assert.deepEqual(r.body, {ok: false});
+    assert.deepEqual(statuses(r.d), [status]);
+  }
+  // Every lifetime keeps CDN time plus display time inside the hold, less the margin.
+  for (const seconds of [121, 300, 659, 660, 661, 3600, 86400]) {
+    const life = quoteLifetime(NOW + seconds * 1000, NOW);
+    assert.ok(life.sMaxAge + life.staleWhileRevalidate + life.validFor <= seconds - 60, String(seconds));
+    assert.ok(life.validFor >= 60, String(seconds));
+  }
+  assert.equal(quoteLifetime(NOW + 119e3, NOW), null);
+});
+
+// Blocker 3: Guesty's own count survives a failed or lost write.
+for (const [name, fault] of [['throws', 'throw'], ['is a rejected conditional write', 'reject']]) {
+  test(`when the write recording Guesty's zero balance ${name}, no token is requested until the hold ends`, async () => {
+    const guesty = fakeGuesty([[TOKEN_URL, () => json(500, {}, {'ratelimit-limit': '5', 'ratelimit-remaining': '0', 'ratelimit-reset': '7200'})]]);
+    // Write 1 counts the attempt (and sets the hold); every later write of the record fails until
+    // the store recovers.
+    let broken = true;
+    const d = deps(guesty, {store: memoryStore({faults: {'token-issuance': n => (n > 1 && broken ? fault : undefined)}})});
+    assert.equal((await calendarResponse('lunar-dome', d)).status, 502);
+    assert.equal(guesty.tokenCalls(), 1);
+    d.tick(3 * 60e3);                                          // past the 2-minute 5xx backoff
+    assert.equal((await calendarResponse('lunar-dome', {...d, memo: {}})).status, 503);
+    d.tick(2 * 3600e3);                                        // past Guesty's reset too: the hold still stands
+    await calendarResponse('lunar-dome', {...d, memo: {}});
+    assert.equal(guesty.tokenCalls(), 1, 'a token request while Guesty\'s count was unrecorded');
+    assert.deepEqual(statuses(d), ['token_500', 'token_hold', 'token_hold']);
+    // The hold lasts 24 hours from the attempt, the longest a used slot takes to regenerate.
+    broken = false;
+    d.tick(22 * 3600e3 - 3 * 60e3 - 1);
+    await calendarResponse('lunar-dome', {...d, memo: {}});
+    assert.equal(guesty.tokenCalls(), 1);
+    d.tick(2);
+    await calendarResponse('lunar-dome', {...d, memo: {}});
+    assert.equal(guesty.tokenCalls(), 2);
+  });
+}
+
+test('the hold is written with the attempt, before the request, and lifted by the write that records the answer', async () => {
+  let seenAtSend = null;
+  const store = memoryStore();
+  const guesty = fakeGuesty([[TOKEN_URL, async () => {
+    seenAtSend = structuredClone((await store.getWithMetadata('token-issuance')).data);
+    return json(500, {}, {'ratelimit-remaining': '2', 'ratelimit-reset': '600'});
+  }]]);
+  const d = deps(guesty, {store});
+  await calendarResponse('lunar-dome', d);
+  assert.deepEqual(seenAtSend.attempts, [NOW]);
+  assert.deepEqual(seenAtSend.hold, {at: NOW, until: NOW + 86400e3});
+  const after = store.data.get('token-issuance').value;
+  assert.equal(after.hold, undefined);
+  assert.deepEqual(after.guesty, {remaining: 2, at: NOW, resetAt: NOW + 600e3});
+  // A lost reply has no count to keep: the attempt stays counted and the hold is lifted.
+  const lost = fakeGuesty([[TOKEN_URL, hang]]);
+  const l = deps(lost);
+  await calendarResponse('lunar-dome', l);
+  assert.equal(l.store.data.get('token-issuance').value.hold, undefined);
+  assert.equal(l.store.data.get('token-issuance').value.attempts.length, 1);
+  // A conditional write that loses once is retried against the new record, and still lifts the hold.
+  const retried = deps(fakeGuesty([[TOKEN_URL, () => json(500, {}, {'ratelimit-remaining': '1', 'ratelimit-reset': '60'})]]),
+    {store: memoryStore({faults: {'token-issuance': n => (n === 2 ? 'reject' : undefined)}})});
+  await calendarResponse('lunar-dome', retried);
+  assert.equal(retried.store.data.get('token-issuance').value.hold, undefined);
+  assert.equal(retried.store.data.get('token-issuance').value.guesty.remaining, 1);
+});
+
+// Fix 1: the deadline covers the body, not only the headers.
+const slowBody = (status, body, ms, headers = {}) => init => new Response(new ReadableStream({
+  start(controller) {
+    const timer = setTimeout(() => { controller.enqueue(new TextEncoder().encode(JSON.stringify(body))); controller.close(); }, ms);
+    init.signal.addEventListener('abort', () => { clearTimeout(timer); controller.error(init.signal.reason); });
+  }
+}), {status, headers});
+const deafBody = (status, body, ms) => () => ({ok: status < 300, status, headers: new Headers(),
+  json: () => new Promise(resolve => setTimeout(() => resolve(body), ms))});
+
+for (const [name, makeBody] of [['a signal-aware body', slowBody], ['a body that ignores the signal', deafBody]]) {
+  test(`a stall after good headers is a timeout, for the token and for the data (${name})`, async () => {
+    // Token body stalls.
+    // The body would arrive at 400 ms; the 10 ms deadline must end the call long before that.
+    const tokenStall = fakeGuesty([[TOKEN_URL, makeBody(200, {token_type: 'Bearer', expires_in: 86400, access_token: TOKEN}, 400)]]);
+    const t = deps(tokenStall, {timeoutMs: 10});
+    const started = Date.now();
+    assert.equal((await calendarResponse('lunar-dome', t)).status, 502);
+    assert.ok(Date.now() - started < 300, `took ${Date.now() - started} ms`);
+    assert.deepEqual(statuses(t), ['token_timeout']);
+    assert.equal(t.memo.pending, null);                         // the shared renewal is released
+    // Data body stalls.
+    const dataStall = fakeGuesty([[TOKEN_URL, tokenOk], [QUOTE_URL, makeBody(200, quoteBody(standardItems, standardMoney), 400)]]);
+    const q = deps(dataStall, {timeoutMs: 10});
+    q.memo.token = {accessToken: TOKEN, expiresAt: NOW + 86400e3};
+    const begun = Date.now();
+    assert.equal((await quoteResponse('lunar-dome', params(goodQuery), q)).status, 502);
+    assert.ok(Date.now() - begun < 300, `took ${Date.now() - begun} ms`);
+    assert.deepEqual(statuses(q), ['timeout']);
+  });
+}
+
+// Fix 2: concurrent 429s keep the longest cooldown.
+test('four workers that hit a 429 together, shortest first, keep the longest cooldown', async () => {
+  for (const waits of [['60', '120', '180', '3600'], ['3600', '180', '120', '60'], ['5', '10', '15', '20', '25', '30', '35', '40', '45', '3600']]) {
+    const store = memoryStore();
+    const queue = [...waits];
+    const guesty = fakeGuesty([[TOKEN_URL, tokenOk], ['/calendar', () => json(429, {}, {'retry-after': queue.shift()})]]);
+    const make = () => createGuesty({clientId: CLIENT, clientSecret: SECRET, store, fetch: guesty.fetch, now: () => NOW,
+      memo: {token: {accessToken: TOKEN, expiresAt: NOW + 86400e3}}, timeoutMs: 50});
+    const workers = waits.map(make);
+    await Promise.allSettled(workers.map(w => w.get('/api/listings/x/calendar')));
+    assert.equal((await store.getWithMetadata('api-backoff')).data.until, NOW + 3600e3, waits.join(','));
+    // A fresh worker at second 181 makes no upstream call.
+    const before = guesty.calls.length;
+    const fresh = createGuesty({clientId: CLIENT, clientSecret: SECRET, store, fetch: guesty.fetch, now: () => NOW + 181e3,
+      memo: {token: {accessToken: TOKEN, expiresAt: NOW + 86400e3}}, timeoutMs: 50});
+    await assert.rejects(fresh.get('/api/listings/x/calendar'), /rate_limited/);
+    assert.equal(guesty.calls.length, before);
+  }
+});
+
+// Fix 3: nightly prices and included-tax labels, as Guesty sends them.
+test('the quote passes through the plan\'s nightly prices and names included taxes without adding them', async () => {
+  const stay = {checkIn: '2026-12-10', checkOut: '2026-12-12'};
+  const days = [{date: '2026-12-10', price: 100, currency: 'USD', basePrice: 100}, {date: '2026-12-11', price: 150, currency: 'USD'}];
+  const items = [{title: 'Accommodation fare', amount: 250, currency: 'USD', includedTaxesList: [{type: 'LOCAL_TAX', normalType: 'LT', title: 'Local tax'}]}];
+  const schema = quoteWith({ratePlan: {_id: 'rp', name: 'Standard', days, money: {currency: 'USD', hostPayout: 250, invoiceItems: items}}});
+  const expected = {currency: 'USD', ratePlan: '', total: 250, expiresAt: Date.parse(EXPIRES),
+    lines: [{title: 'Accommodation fare', amount: 250, included: ['Local tax']}],
+    nightly: [{date: '2026-12-10', amount: 100}, {date: '2026-12-11', amount: 150}]};
+  assert.deepEqual(mapQuote(schema, stay), expected);
+  // The flow guide's layout, days on the entry itself, out of order: same result.
+  assert.deepEqual(mapQuote(quoteWith({name: 'Standard', days: [...days].reverse(), money: {currency: 'USD', hostPayout: 250, invoiceItems: items}}), stay), expected);
+  // Through the function, for the requested nights.
+  const guesty = fakeGuesty([[TOKEN_URL, tokenOk], [QUOTE_URL, () => json(200, schema)]]);
+  const body = await (await quoteResponse('lunar-dome', params({checkIn: stay.checkIn, checkOut: stay.checkOut, guests: '2'}), deps(guesty))).json();
+  assert.deepEqual(body.nightly, expected.nightly);
+  assert.deepEqual(body.lines, expected.lines);
+  assert.equal(body.total, 250);
+  // A nightly list that is not exactly this stay's nights, in the plan's currency, refuses the quote.
+  const withDays = list => quoteWith({ratePlan: {name: 'Standard', days: list, money: {currency: 'USD', hostPayout: 250, invoiceItems: items}}});
+  for (const list of [
+    [days[0]],                                                            // a night missing
+    [days[0], {...days[1], date: '2026-12-12'}],                          // a night outside the stay
+    [days[0], days[0]],                                                   // a repeated night
+    [days[0], {...days[1], currency: 'EUR'}],                             // another currency
+    [days[0], {...days[1], price: 'x'}], [days[0], {...days[1], price: -1}], [days[0], {...days[1], price: 1.005}],
+    'not a list'
+  ]) assert.throws(() => mapQuote(withDays(list), stay), /quote_malformed/, JSON.stringify(list));
+  // No nightly list: the quote stands without one. An included-tax list that is not a list refuses.
+  assert.deepEqual(mapQuote(withDays(undefined), stay).nightly, []);
+  assert.throws(() => mapQuote(quoteBody([{...items[0], includedTaxesList: 'Local tax'}], {hostPayout: 250}), stay), /quote_malformed/);
+  // An included tax without a name is still named as a tax; duplicates are named once.
+  assert.deepEqual(mapQuote(quoteBody([{...items[0], includedTaxesList: [{type: 'X'}, {title: 'Local tax'}, {title: 'Local tax'}]}], {hostPayout: 250}), stay).lines[0].included, ['tax', 'Local tax']);
+});
+
+// Fix 6: a calendar that contradicts itself.
+test('two different rows for the same night refuse the calendar in either order; identical rows collapse', async () => {
+  const open = {date: '2026-12-05', status: 'available', minNights: 2};
+  const booked = {date: '2026-12-05', status: 'booked', minNights: 2};
+  for (const rows of [[open, booked], [booked, open], [open, {...open, minNights: 3}], [open, {...open, cta: true}]]) {
+    assert.throws(() => mapCalendar(rows, '2026-12-01', '2027-11-30'), /calendar_malformed/);
+    const guesty = fakeGuesty([[TOKEN_URL, tokenOk], [CALENDAR_URL, () => json(200, rows)]]);
+    const d = deps(guesty);
+    const res = await calendarResponse('lunar-dome', d);
+    assert.equal(res.status, 502);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.equal(res.headers.get('netlify-cdn-cache-control'), null);
+    assert.deepEqual(statuses(d), ['calendar_malformed']);
+  }
+  assert.deepEqual(mapCalendar([open, {...open}], '2026-12-01', '2027-11-30'),
+    [{date: '2026-12-05', available: true, minNights: 2, noArrival: false, noDeparture: false}]);
+});
+
+// Blocker 2 and fix 7: the owner script.
+test('the owner script sends the documented token request and says to wait 24 hours before anything is sent', async () => {
+  const events = [];
+  const log = line => events.push(['log', line]);
+  const fetchOk = remaining => async (url, init) => {
+    events.push(['fetch', String(url)]);
+    return json(200, {token_type: 'Bearer', expires_in: 86400, access_token: TOKEN}, {'ratelimit-remaining': remaining});
+  };
+  const calls = [];
+  const recording = async (url, init) => { calls.push({href: String(url), init}); return fetchOk('4')(url, init); };
+  assert.equal(await requestOwnerToken({fetch: recording, clientId: CLIENT, clientSecret: SECRET, log, now: () => NOW}), TOKEN);
+  assertTokenRequest(calls[0]);
+  // Even with 4 (or 5) slots left, the instruction is the same 24-hour wait, given before the request.
+  for (const remaining of ['4', '5']) {
+    events.length = 0;
+    await requestOwnerToken({fetch: fetchOk(remaining), clientId: CLIENT, clientSecret: SECRET, log, now: () => NOW});
+    assert.equal(events[0][0], 'log');
+    assert.equal(events[1][0], 'fetch');
+    const text = events.filter(e => e[0] === 'log').map(e => e[1]).join('\n');
+    assert.match(events[0][1], /blank until 2026-12-02T18:00:00\.000Z/);
+    assert.match(events[0][1], /even if this run fails or stops/);
+    assert.doesNotMatch(text, /any time|immediately|may request its first token/i);
+  }
+  // A request that never answers or is refused: the wait was already printed, and it says so again.
+  events.length = 0;
+  await assert.rejects(requestOwnerToken({fetch: () => Promise.reject(new DOMException('timed out', 'TimeoutError')), clientId: CLIENT, clientSecret: SECRET, log, now: () => NOW}));
+  assert.match(events[0][1], /blank until 2026-12-02T18:00:00\.000Z/);
+  await assert.rejects(requestOwnerToken({fetch: async () => json(429, {}), clientId: CLIENT, clientSecret: SECRET, log, now: () => NOW}), /24-hour wait above still applies/);
+  // The repo's procedure carries no "go now" exception either.
+  const runbook = read('docs/GUESTY_SETUP.md');
+  assert.match(runbook, /24 hours/);
+  assert.doesNotMatch(runbook + read('scripts/guesty-listings.mjs'), /at least 4|any time after this run/i);
+});
+
+// Hardening notes.
+test('the owner script refuses a listing reply with fewer listings than the total Guesty states', async () => {
+  const one = async () => json(200, {results: [{_id: 'aaaaaa1', title: 'Lunar Dome'}], pagination: {total: 10, cursor: {next: null}}});
+  await assert.rejects(listAllListings(one, 't'), /says the instance has 10 listing\(s\) but sent 1/);
+  const exact = async () => json(200, {results: [{_id: 'aaaaaa1', title: 'Lunar Dome'}], pagination: {total: 1, cursor: {next: null}}});
+  assert.equal((await listAllListings(exact, 't')).length, 1);
+});
+
+test('among several plans, an unnamed cheapest plan is refused rather than shown without its name', () => {
+  const fare = amount => [{title: 'Fare', amount, currency: 'USD'}];
+  assert.throws(() => mapQuote(quoteWith(schemaPlan('Flexible', fare(500), {hostPayout: 500}), schemaPlan('', fare(450), {hostPayout: 450}))), /quote_ambiguous/);
+  assert.throws(() => mapQuote(quoteWith(flowPlan('Flexible', fare(500), {hostPayout: 500}), {days: [], money: {currency: 'USD', hostPayout: 450, invoiceItems: fare(450)}})), /quote_ambiguous/);
+  // An unnamed plan that is not the cheapest does not stop the named cheapest one.
+  assert.equal(mapQuote(quoteWith(schemaPlan('', fare(500), {hostPayout: 500}), schemaPlan('Non-refundable', fare(450), {hostPayout: 450}))).ratePlan, 'Non-refundable');
+  // A single unnamed plan is fine: there is nothing to tell it apart from.
+  assert.equal(mapQuote(quoteWith(schemaPlan('', fare(450), {hostPayout: 450}))).total, 450);
+});
+
+test('a token 429 waits for the whole Retry-After, beyond 24 hours, in seconds or as a date', () => {
+  const res = headers => json(429, {}, headers);
+  assert.equal(tokenBackoffMs(429, 0, res({'retry-after': '172800'}), NOW), 172800e3);
+  assert.equal(tokenBackoffMs(429, 0, res({'retry-after': new Date(NOW + 30 * 3600e3).toUTCString()}), NOW), 30 * 3600e3);
+  assert.equal(tokenBackoffMs(429, 0, res({'retry-after': '60'}), NOW), 15 * 60e3);           // never less than 15 minutes
+  assert.equal(tokenBackoffMs(429, 0, res({}), NOW), 3600e3);
 });
