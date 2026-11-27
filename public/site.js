@@ -120,7 +120,7 @@ function setupFilters() {
     let matches = 0;
     for (const card of cards) {
       card.hidden = Number(card.dataset.guests) < Number(guests.value)
-        || (tub.checked && card.dataset.tub !== 'true') || (pool.checked && card.dataset.pool !== 'true');
+        || (tub?.checked && card.dataset.tub !== 'true') || (pool.checked && card.dataset.pool !== 'true');
       if (!card.hidden) matches++;
     }
     count.textContent = matches + (matches === 1 ? ' stay' : ' stays');
@@ -131,14 +131,14 @@ function setupFilters() {
     const params = new URLSearchParams(location.search);
     guests.value = params.get('guests') || '0';
     if (!guests.value) guests.value = '0';
-    tub.checked = params.get('tub') === '1';
+    if (tub) tub.checked = params.get('tub') === '1';
     pool.checked = params.get('pool') === '1';
     render();
   }
 
   function update() {
     const url = new URL(location.href);
-    for (const [key, value] of [['guests',guests.value === '0' ? '' : guests.value], ['tub',tub.checked ? '1' : ''], ['pool',pool.checked ? '1' : '']]) {
+    for (const [key, value] of [['guests',guests.value === '0' ? '' : guests.value], ['tub',tub?.checked ? '1' : ''], ['pool',pool.checked ? '1' : '']]) {
       if (value) url.searchParams.set(key, value);
       else url.searchParams.delete(key);
     }

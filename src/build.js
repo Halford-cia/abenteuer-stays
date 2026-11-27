@@ -47,7 +47,7 @@ const pages = [
     description:'Explore ten private Hill Country stays near Fredericksburg, Texas. Find treetop domes, canvas retreats, tiny homes and country houses with private hot tubs.',
     render:() => home(stays), schema:business},
   {path:'/stays/',title:'The Stays | Fredericksburg Domes, Tents & Homes | Stay Eden',
-    description:'Compare all ten Stay Eden rentals by guest capacity, private hot tub and cowboy pool. See photos, amenities and booking details for each stay.',
+    description:'Compare all ten Stay Eden rentals by guest capacity and cowboy pool. See photos, amenities and booking details for each stay.',
     image:stays[1].photos[0],render:() => collection(stays)},
   {path:'/experiences/',title:'Fredericksburg & Luckenbach Field Guide | Stay Eden',
     description:'Plan a Hill Country day around Main Street, Becker Vineyards, the Luckenbach dance hall and Old Tunnel State Park, with links to each destination.',

@@ -51,7 +51,11 @@ main:focus { outline: none; }
 .mark { width: 2.2rem; height: 2.55rem; }
 .site-header { position: relative; z-index: 3; }
 .topbar { min-height: 5.65rem; display: flex; gap: 2.9rem; align-items: center; border-bottom: 1px solid var(--line); }
-.over-photo { position: absolute; inset: 0 0 auto; color: #fffdf4; background: linear-gradient(#101d1aaa, transparent); }
+.over-photo { position: absolute; inset: 0 0 auto; color: #fffdf4; }
+.over-photo::before {
+  content: ''; position: absolute; inset: 0 0 -1.5rem; z-index: -1; pointer-events: none;
+  background: linear-gradient(#101d1ac9, #101d1aa8 calc(100% - 1.5rem), transparent);
+}
 .over-photo .topbar { border-color: #ffffff64; }
 .desktop-nav { margin-left: auto; display: flex; align-items: center; gap: clamp(1.1rem, 2.5vw, 2.6rem); }
 .desktop-nav a, .mobile-nav a { font-size: .9375rem; text-decoration: none; }
@@ -68,6 +72,9 @@ main:focus { outline: none; }
 .text-link { display: inline-block; width: fit-content; text-decoration: none; border-bottom: 1px solid currentColor; padding: .18rem 0; font-size: .94rem; font-weight: 500; }
 .text-link:hover { color: #78512b; }
 .hero .eyebrow { color: #fff8df; }
+.hero-body .eyebrow, .unit-hero:not(.framed) .eyebrow {
+  width: fit-content; padding: .2rem .65rem; background: #101813b8;
+}
 .hero .short-rule { background: #dfbd8d; }
 .hero-body > p:not(.eyebrow) { font-size: clamp(1.02rem,1.35vw,1.21rem); max-width: 23em; line-height: 1.55; color: #fffdf4; text-wrap: pretty; }
 .hero-body > .button { margin-top: 1.55rem; }
@@ -115,6 +122,7 @@ main:focus { outline: none; }
 .page-intro h1 { margin: 1rem 0 1.5rem; }
 .lede { max-width: 42rem; color: var(--muted); font-size: clamp(1.075rem, 1.45vw, 1.35rem); line-height: 1.55; }
 .collection, .gallery-section { padding-bottom: clamp(4rem, 7vw, 7.5rem); }
+.collection-amenity { margin-bottom: .75rem; }
 .filters { border-block: 1px solid var(--line); display: flex; align-items: center; flex-wrap: wrap; gap: 1rem 2.6rem; padding: 1.2rem 0; }
 .guest-filter, .check { display: flex; align-items: center; gap: .65rem; min-height: 2.75rem; font-weight: 500; }
 select { background: var(--paper) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2324362b' stroke-width='1.6'%3E%3Cpath d='m6 8 4 4 4-4'/%3E%3C/svg%3E") right .55rem center / 1.2rem no-repeat; appearance: none; color: var(--ink); border: 1px solid #888f80; border-radius: .25rem; padding: .65rem 2.25rem .65rem .75rem; }
@@ -303,7 +311,8 @@ em .word + .word { --delay: 320ms; }
   .hero h1 { font-size: clamp(3.35rem,12.4vw,5.6rem); }
   .hero-body { padding-block: 8rem 2.2rem; }
   .hero-foot { min-height: 4.7rem; }
-  .hero::before, .unit-hero::before { background: linear-gradient(0deg,#07130ff5, #0a1711a8 28%, #101a1420 68%, #0b191b52); }
+  .hero::before { background: linear-gradient(0deg, #07130ff5, #0a1711c2 30%, #101a148a 65%, transparent 85%); }
+  .unit-hero::before { background: linear-gradient(0deg,#07130ff5, #0a1711a8 28%, #101a1420 68%, #0b191b52); }
   .hero-foot { min-height: 4.7rem; }
   .frame > a { font-size: clamp(1rem,3.9vw,1.35rem); }
   .frame-controls { gap: .38rem; }

@@ -64,17 +64,19 @@ export function home(stays) {
 }
 
 export function collection(stays) {
+  const allHaveHotTubs = stays.every(stay => stay.hotTub);
   return `${pageIntro('Stay Eden · Fredericksburg','The <em>stays.</em>','Find a place for two beneath the trees or bring the whole group to a Hill Country house.')}
     <section class="shell collection" id="collection" aria-label="Stay collection">
+      ${allHaveHotTubs ? '<p class="collection-amenity">Every stay has a private hot tub.</p>' : ''}
       <form class="filters" hidden><label class="guest-filter">Guests <select name="guests">
       <option value="0">Any group size</option>${Array.from({length:16}, (_,i) => {
         const n = i + 1;
         return `<option value="${n}">${n} ${n === 1 ? "guest" : "guests"}</option>`;
       }).join("")}</select></label>
-      <label class="check"><input type="checkbox" name="tub"> Private hot tub</label>
+      ${allHaveHotTubs ? '' : '<label class="check"><input type="checkbox" name="tub"> Private hot tub</label>'}
       <label class="check"><input type="checkbox" name="pool"> Cowboy pool</label>
       <button class="reset" type="reset">Clear filters</button></form>
-      <h2 class="result-count" aria-live="polite"><span data-count>10 stays</span></h2>
+      <h2 class="result-count" aria-live="polite"><span data-count>${stays.length} stays</span></h2>
       <div class="card-grid">${stays.map((s, i) => stayCard(s,{filter:true,priority:i === 0})).join('')}</div>
       <div class="empty" hidden><p>There are no stays with this combination. Try another group size or clear your filters.</p><button class="button dark" data-clear>Show all stays</button></div>
     </section>`;
@@ -86,7 +88,8 @@ export function unit(stay, bundle) {
   const framed = hero.framed;
   const detail = stay.photos[1];
   const portrait = detail.height > detail.width;
-  const facts = [capacity(stay), stay.type, stay.amenities.includes('Two private hot tubs') ? 'Two private hot tubs' : 'Private hot tub'];
+  const facts = [capacity(stay), stay.type];
+  if (stay.hotTub) facts.push(stay.amenities.includes('Two private hot tubs') ? 'Two private hot tubs' : 'Private hot tub');
   if (stay.cowboyPool) facts.push('Cowboy pool');
   return `<section class="unit-hero${framed ? ' framed' : ''}"><div class="unit-still stay-frame" style="view-transition-name:stay-${stay.slug}">
       ${picture(hero,{priority:true, sizes:framed ? '(min-width: 760px) min(54vw, 64rem), 89vw' : '100vw'}, !framed)}</div>
@@ -120,7 +123,7 @@ export function experiences() {
 }
 
 export function extras(stays) {
-  return `${pageIntro('Stay extras','Arrive a little <em>earlier.</em>','Make room for a glass of wine and a few extra hours in the Hill Country.')}
+  return `${pageIntro('Stay extras','Arrive a little <em>earlier.</em>','Enjoy a glass of wine and an earlier arrival in the Hill Country.')}
     <section class="shell editorial-split"><div class="editorial-photo">${picture(stays.find(s => s.slug === 'cherry-cove').photos[3],{priority:true,sizes:'(min-width: 800px) 50vw, 100vw'})}</div>
     <div class="editorial-copy">${eyebrow('The arrival bundle')}<h2>Wine &amp;<br><em>early check-in.</em></h2><p class="price">$75 <span>per bundle</span></p>
     <p>Pair wine with an earlier arrival. Once you’ve reserved your stay, ask for the bundle in your Airbnb message thread. Your host will confirm availability and the check-in time.</p><p>${paymentSafety}</p>
