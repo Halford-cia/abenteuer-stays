@@ -10,7 +10,8 @@
 // Each run requests one access token from the same small daily allowance the site uses (Guesty:
 // "Tokens can only be renewed 3 times in 24 hours"), and the site cannot see that request. So after
 // every run, whatever it printed and even if it failed or stopped, keep every stay in
-// data/guesty-listings.json blank for 24 hours (docs/GUESTY_SETUP.md, step 4). Never run it in a loop.
+// data/guesty-listings.json blank for the later of 24 hours and any stop Guesty sends (the script
+// prints it; docs/GUESTY_SETUP.md, step 4). Never run it in a loop.
 import {readFile} from 'node:fs/promises';
 import {createInterface} from 'node:readline';
 import {API_BASE, TOKEN_URL} from '../netlify/lib/guesty.js';
@@ -108,7 +109,8 @@ export async function requestOwnerToken({fetch: fetchImpl, clientId, clientSecre
   if (!body || typeof body.access_token !== 'string' || !body.access_token) throw new Error('Guesty sent no access token. ' + (later || 'The 24-hour wait above still applies.'));
   if (remaining) log(`Guesty reports ${remaining} token request(s) left in its 24-hour window. The 24-hour wait above applies whatever this number is.`);
   if (later) log(later);
-  return body.access_token;
+  // waitUntil: the one effective time, the later of the 24 hours and Guesty's stop.
+  return {token: body.access_token, waitUntil: later ? stop : until};
 }
 
 function ask(question, hidden) {
@@ -122,7 +124,7 @@ export async function run({env = process.env, fetch: fetchImpl = fetch, log = co
   const clientSecret = env.GUESTY_BE_CLIENT_SECRET || await prompt('Guesty BE client secret (hidden): ', true);
   if (!clientId || !clientSecret) throw new Error('Both the client ID and the client secret are needed.');
 
-  const token = await requestOwnerToken({fetch: fetchImpl, clientId, clientSecret, log, now});
+  const {token, waitUntil} = await requestOwnerToken({fetch: fetchImpl, clientId, clientSecret, log, now});
   const listings = await listAllListings(fetchImpl, token);
 
   log(`\n${listings.length} listing(s) in this Booking Engine API instance:\n`);
@@ -131,7 +133,8 @@ export async function run({env = process.env, fetch: fetchImpl = fetch, log = co
   const list = stays || JSON.parse(await readFile(new URL('../data/stays.json', import.meta.url), 'utf8'));
   const map = suggest(list, listings);
   log('\nSuggested data/guesty-listings.json (a stay is filled only when exactly one title contains its name;');
-  log('check every line against the list above and fill any blank by hand; push it only after the 24-hour wait):\n');
+  log('check every line against the list above and fill any blank by hand;');
+  log(`put it in data/guesty-listings.json and push it only after ${stamp(new Date(waitUntil))}, the wait printed above):\n`);
   log(JSON.stringify(map, null, 2));
   const missing = list.filter(stay => !map[stay.slug]).map(stay => stay.name);
   if (missing.length) log(`\nNot matched: ${missing.join(', ')}`);

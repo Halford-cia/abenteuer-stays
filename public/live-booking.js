@@ -175,8 +175,12 @@
   // back to an open tab days later. Older than CALENDAR_MAX_AGE (or of unknown age, after a clock
   // correction), it is asked for again on return and when the picker opens. If that fails, the
   // old restrictions are dropped (no stale "taken" night stays) and the Airbnb form is untouched.
+  // A failed request (the first one, or a refresh) is tried again on the first return or picker
+  // opening at least CALENDAR_RETRY after it, so a short outage does not end live dates for the tab.
   const CALENDAR_MAX_AGE = 15 * 60e3;
-  let loadedAt = null;
+  const CALENDAR_RETRY = 60e3;
+  let loadedAt = null;    // when the availability on the page arrived
+  let failedAt = null;    // when the last request failed, while no newer one has succeeded
   let loading = null;
   function setDays(list) {
     days = list ? rules.index(list) : null;
@@ -193,18 +197,23 @@
       loading = null;
       if (calendar && Array.isArray(calendar.days)) {
         loadedAt = Date.now();
+        failedAt = null;
         setDays(calendar.days);
-      } else if (days) {
+      } else {
         loadedAt = null;
-        setDays(null);
+        failedAt = Date.now();
+        if (days) setDays(null);
       }
     });
     return loading;
   }
+  // Due for a new request: availability past its age, or a failure past the retry pause. Before
+  // the first request has finished, nothing is due (the idle load is on its way).
   const calendarAged = () => {
-    if (loadedAt === null) return false;
-    const age = Date.now() - loadedAt;
-    return age < 0 || age >= CALENDAR_MAX_AGE;
+    const since = failedAt !== null ? failedAt : loadedAt;
+    if (since === null) return false;
+    const age = Date.now() - since;
+    return age < 0 || age >= (failedAt !== null ? CALENDAR_RETRY : CALENDAR_MAX_AGE);
   };
 
   // Back from another page (bfcache), another tab or a sleeping device: timers may not have run.

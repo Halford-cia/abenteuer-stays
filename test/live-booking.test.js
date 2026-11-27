@@ -454,3 +454,57 @@ test('built page: availability older than 15 minutes is checked again on return 
   assert.equal(p.box().hidden, true);
   assertAirbnbHandoff(p, D(10), D(12), '2');
 });
+
+// Round 4, fix 1: a failed calendar request is tried again on a later return or picker opening,
+// both when the first request failed and when a refresh of good availability failed. Book stays
+// usable throughout.
+test('built page: after a failed calendar request, a later return or picker opening asks again and live dates come back', async () => {
+  for (const firstFails of [true, false]) {
+    const label = `first request ${firstFails ? 'failed' : 'succeeded, refresh failed'}`;
+    let fail = firstFails;
+    const live = {ok: true, from: D(0), to: D(364), days: [{date: D(10), available: false, minNights: 1, noArrival: false, noDeparture: false}]};
+    const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: url =>
+      (url.endsWith('/calendar') ? (fail ? failed() : reply(live)) : reply(quoteFor(D(11), D(13), '2')))});
+    const blocked = () => p.ctx.window.stayLive?.dayState(D(10), '').blocked;
+    p.idle();
+    await p.settle();
+    let calls = 1;
+    if (!firstFails) {
+      assert.equal(blocked(), true);
+      // The good availability ages, and its refresh fails: the old restriction goes.
+      fail = true;
+      await p.advance(16 * 60e3, {fireTimers: false});
+      await p.fireWindow('pageshow');
+      calls = 2;
+    }
+    assert.equal(calendarCalls(p), calls, label);
+    assert.equal(p.ctx.window.stayLive, undefined, label);
+    await p.choose(D(11), D(13), '2');
+    assertAirbnbHandoff(p, D(11), D(13), '2');                             // Book works while live data is out
+    // Guesty is back. Twenty minutes later the guest returns and opens the picker: asked again.
+    fail = false;
+    await p.advance(20 * 60e3, {fireTimers: false});
+    p.root.querySelector('[data-calendar-open]').click();
+    await p.settle();
+    assert.equal(calendarCalls(p), calls + 1, `the calendar was not asked for again (${label})`);
+    assert.equal(blocked(), true, `the booked night is not marked again (${label})`);
+    p.dialog().close();
+    // Fresh again: a focus right after does not ask.
+    await p.fireWindow('focus');
+    assert.equal(calendarCalls(p), calls + 1, label);
+    // Aged, refresh fails; within a minute of that failure a return does not ask, after it one does.
+    fail = true;
+    await p.advance(16 * 60e3, {fireTimers: false});
+    await p.fireWindow('focus');
+    assert.equal(calendarCalls(p), calls + 2, label);
+    fail = false;
+    await p.advance(30e3, {fireTimers: false});
+    await p.fireWindow('focus');
+    assert.equal(calendarCalls(p), calls + 2, `asked again within the retry pause (${label})`);
+    await p.advance(31e3, {fireTimers: false});
+    await p.fireDocument('visibilitychange');
+    assert.equal(calendarCalls(p), calls + 3, label);
+    assert.equal(blocked(), true, label);
+    assertAirbnbHandoff(p, D(11), D(13), '2');
+  }
+});

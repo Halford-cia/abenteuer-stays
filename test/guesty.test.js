@@ -763,7 +763,7 @@ test('the owner script sends the documented token request and says to wait 24 ho
   };
   const calls = [];
   const recording = async (url, init) => { calls.push({href: String(url), init}); return fetchOk('4')(url, init); };
-  assert.equal(await requestOwnerToken({fetch: recording, clientId: CLIENT, clientSecret: SECRET, log, now: () => NOW}), TOKEN);
+  assert.equal((await requestOwnerToken({fetch: recording, clientId: CLIENT, clientSecret: SECRET, log, now: () => NOW})).token, TOKEN);
   assertTokenRequest(calls[0]);
   // Even with 4 (or 5) slots left, the instruction is the same 24-hour wait, given before the request.
   for (const remaining of ['4', '5']) {
@@ -944,4 +944,31 @@ test('the owner script lists every page with the token it was issued', async () 
   assert.match(out, /aaaaaa1 {2}Lunar Dome/);
   assert.match(out, /bbbbbb2 {2}Cloud Dome/);
   assert.match(out, /"lunar-dome": "aaaaaa1"/);
+});
+
+// Round 4, fix 2: the instruction beside the suggested map names the one effective time (the later
+// of 24 hours and Guesty's stop), and the README sends Hank to the guide's "later of" rule.
+test('the owner script repeats the effective wait beside the suggested map, and the README defers to the guide', async () => {
+  const listing = {results: [{_id: 'aaaaaa1', title: 'Lunar Dome'}], pagination: {total: 1, cursor: {next: null}}};
+  const owner = async tokenHeaders => {
+    const lines = [];
+    const fetchMock = async url => (new URL(url).href === TOKEN_URL
+      ? json(200, {token_type: 'Bearer', expires_in: 86400, access_token: TOKEN}, tokenHeaders)
+      : json(200, listing));
+    await run({env: {GUESTY_BE_CLIENT_ID: CLIENT, GUESTY_BE_CLIENT_SECRET: SECRET}, fetch: fetchMock, log: line => lines.push(line), now: () => NOW, stays});
+    const out = lines.join('\n');
+    return out.slice(out.indexOf('Suggested data/guesty-listings.json'));
+  };
+  // Guesty's 30-hour reset with no slot left: the map instruction names Dec 3 00:00 UTC, never 24 hours.
+  const later = await owner({'ratelimit-remaining': '0', 'ratelimit-reset': String(30 * 3600)});
+  assert.match(later, /2026-12-03T00:00:00\.000Z/);
+  assert.doesNotMatch(later, /24-hour wait|2026-12-02T18:00/);
+  // A normal reply: the 24-hour time printed at the start, repeated.
+  const normal = await owner({'ratelimit-remaining': '4'});
+  assert.match(normal, /2026-12-02T18:00:00\.000Z/);
+  // The README gives no wait of its own: it points to the guide's rule, the later of the two.
+  const readme = read('README.md');
+  assert.match(readme, /docs\/GUESTY_SETUP\.md/);
+  assert.match(readme, /later of/);
+  assert.doesNotMatch(readme, /blank for 24 hours/);
 });

@@ -5,7 +5,7 @@ This file is the only setup procedure for Guesty live availability and quotes. I
 Two facts drive the order of the steps:
 
 - **Guesty allows very few tokens.** The Authentication page says "Tokens can only be renewed 3 times in 24 hours". Its header quota (`ratelimit-limit`) and the quick start give 5. The site uses the lower figure. Every token request counts, including one whose reply never arrives.
-- **The owner script's token is invisible to the site.** The script runs on your Mac. The site's record of token requests is in Netlify, so the site cannot count the script's request. The only safe rule is to keep every stay unmapped for 24 hours after any run of the script, including a run that fails or stops.
+- **The owner script's token is invisible to the site.** The script runs on your Mac. The site's record of token requests is in Netlify, so the site cannot count the script's request. The only safe rule is to keep every stay unmapped for 24 hours after any run of the script, or until Guesty's own stop when it ends later (step 4), including a run that fails or stops.
 
 ## 1. Check the Netlify plan
 
@@ -32,14 +32,14 @@ Go to Site configuration → Environment variables. Add both `GUESTY_BE_CLIENT_I
 - Under deploy contexts, choose different values per context. Enter the value explicitly for **Production** and for **Deploy Previews**. Leave Branch deploys, Preview server and Local development empty.
 - Redeploy afterwards. Functions pick up variable changes only on a new deploy.
 
-## 4. Run the listing script once, then wait 24 hours
+## 4. Run the listing script once, then wait (24 hours, or Guesty's later stop)
 
 ```
 cd ~/str/guesty && git pull && node scripts/guesty-listings.mjs
 ```
 
-- Before the request is sent, the script prints a time 24 hours ahead. **Keep every stay in `data/guesty-listings.json` blank until that time.** This holds whatever the script prints next, including a report of 4 or 5 tokens left, an error, a timeout or a stop with Ctrl-C.
-- If Guesty answers with its own stop that ends later (a 429's `Retry-After`, or no slot left and a `ratelimit-reset` beyond 24 hours), the script prints that later time too. **Wait for the later of the two times**, both before mapping any stay and before running the script again.
+- Before the request is sent, the script prints a time 24 hours ahead. **Keep every stay in `data/guesty-listings.json` blank until at least that time.** This holds whatever the script prints next, including a report of 4 or 5 tokens left, an error, a timeout or a stop with Ctrl-C.
+- If Guesty answers with its own stop that ends later (a 429's `Retry-After`, or no slot left and a `ratelimit-reset` beyond 24 hours), the script prints that later time too. **Wait for the later of the two times**, both before mapping any stay and before running the script again. The line above the suggested map repeats the time that applies.
 - Do not run the script again before that time. A second run starts a new 24-hour wait.
 - The script prints nothing if the listing list is incomplete: a missing results list, a listing without an id, fewer listings than Guesty's stated total, or more pages than it reads. In that case, wait the 24 hours and run it once more. Never run it in a loop.
 - It writes no file. Copy the suggested map, and check each line against the printed list.
