@@ -102,6 +102,7 @@ export function unit(stay, bundle) {
     <figure class="unit-spread shell${portrait ? ' portrait' : ''}">${picture(detail,{sizes:portrait ? 'min(89vw, 28rem)' : 'min(89vw, 60rem)'})}</figure>
     <div class="shell unit-body"><div><section class="unit-section"><h2>Amenities</h2><ul class="amenities">${amenities(stay).map(item => `<li>${h(item)}</li>`).join('')}</ul></section>
     <section class="unit-section"><h2>House rules</h2><p>Plan for up to ${stay.guests} overnight guests when booking. ${stay.petsAllowed ? 'Airbnb lists pets as welcome here.' : 'Airbnb lists this stay as pet-free.'} Service animals are welcome.</p>
+      ${stay.disclosesUngatedWater ? '<p>The Airbnb listing notes a pool or hot tub without a gate or lock.</p>' : ''}
       <a class="text-link" href="${booking.url}">Read the Airbnb house rules</a></section>
     <section class="unit-section"><h2>Guest reviews</h2><p class="review"><span>${stay.rating.toFixed(2)}</span> / 5 · ${stay.reviews} Airbnb reviews</p>
     <p>${stay.favorite ? 'An Airbnb Guest Favorite. ' : ''}Ratings from ${reviewSnapshot.date}. <a href="${booking.url}">Read reviews on Airbnb</a>.</p></section>

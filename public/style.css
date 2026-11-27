@@ -198,6 +198,7 @@ summary::-webkit-details-marker { display: none; }
   .hamburger { display: inline-block; width: 1.05rem; height: .5rem; border-block: 1px solid; }
   .mobile-nav nav { position: absolute; top: 100%; left: var(--gutter); right: var(--gutter); display: grid; background: var(--paper); color: var(--ink); padding: .6rem 1rem; box-shadow: 0 .5rem 1.5rem #14221b29; }
   .mobile-nav nav a { padding: .65rem .2rem; }
+  .mobile-nav nav a:focus-visible { outline-color: currentColor; }
   .frame-label, .scroll-link { display: none; }
   .frame { width: 100%; justify-content: space-between; }
   .frame-controls { padding-left: 0; border: 0; }
