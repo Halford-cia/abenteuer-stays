@@ -20,7 +20,6 @@ export const mark = `<svg viewBox="0 0 44 48" class="mark" fill="none" stroke="c
 </svg>`;
 const brand = `<a class="brand" href="/" aria-label="Stay Eden home">${mark}<span>Stay Eden</span></a>`;
 export const arrow = side => `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="${side === 'back' ? 'm14 5-7 7 7 7' : 'm10 5 7 7-7 7'}"/></svg>`;
-export const star = '<span class="star" aria-hidden="true">✦</span>';
 export const eyebrow = label => `<p class="eyebrow"><span class="short-rule" aria-hidden="true"></span>${escapeHtml(label)}</p>`;
 export const siteLinks = [['/stays/','The stays'],['/experiences/','Field guide'],['/extras/','Stay extras'],['/about/','About'],['/faq/','FAQ'],['/contact/','Contact']];
 
@@ -53,17 +52,19 @@ export function photo(image, {sizes = '100vw', priority = false, className = ''}
 }
 
 // The portrait crop is reserved for full-height mobile heroes.
+export const portraitMedia = '(orientation: portrait) and (max-width: 900px)';
+
 export function picture(image, options = {}, portrait = false) {
   if (!image.wide) return photo(image, options);
   const sizes = options.sizes || '100vw';
-  return `<picture>${portrait && image.portrait ? `<source media="(orientation: portrait) and (max-width: 900px)" type="image/avif" srcset="${image.portrait}" sizes="100vw">` : ''}
+  return `<picture>${portrait && image.portrait ? `<source media="${portraitMedia}" type="image/avif" srcset="${image.portrait}" sizes="100vw">` : ''}
     <source type="image/avif" srcset="${image.wide}" sizes="${sizes}">${photo(image, options)}</picture>`;
 }
 
 export function stayCard(stay, {filter = false, priority = false} = {}) {
   return `<article class="stay-card" ${filter ? `data-stay data-guests="${stay.guests}" data-tub="${stay.hotTub}" data-pool="${stay.cowboyPool}"` : ''}>
     <a class="card-link" href="${stayPath(stay)}" data-cursor="View">
-      <div class="card-image" style="view-transition-name:stay-${stay.slug}">
+      <div class="card-image stay-frame" style="view-transition-name:stay-${stay.slug}">
         ${picture(stay.photos[0], {sizes:'(max-width: 609px) 90vw, (max-width: 959px) 44vw, 30vw', priority})}
       </div>
       <p class="card-meta">${stay.type}<span>·</span>${capacity(stay)}</p>

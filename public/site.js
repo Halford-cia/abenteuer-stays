@@ -45,7 +45,7 @@ function setupFrames() {
     img.loading = 'eager';
     scene.append(shot);
     try { await img.decode(); } catch { shot.remove(); if (request === version) schedule(); return; }
-    if (request !== version || reducedMotion.matches || (!manual && (paused || !visible || document.hidden))) {
+    if (request !== version || reducedMotion.matches || (!manual && (paused || !visible || document.hidden || document.activeElement === caption))) {
       shot.remove();
       return;
     }
@@ -54,10 +54,10 @@ function setupFrames() {
     shot.classList.add('current');
     shot.removeAttribute('aria-hidden');
     previous.setAttribute('aria-hidden', 'true');
-    previous.classList.remove('current');
+    previous.classList.replace('current', 'outgoing');
     current = shot;
     index = next;
-    setTimeout(() => { if (previous !== current) previous.remove(); }, 1300);
+    setTimeout(() => { if (previous !== current) previous.remove(); }, 1650);
     describe(manual);
     schedule();
   }
@@ -69,7 +69,7 @@ function setupFrames() {
     schedule();
   }
   play.addEventListener('click', togglePlay);
-  hero.addEventListener('click', event => { if (event.target === hero) togglePlay(); });
+  hero.addEventListener('click', event => { if (event.pointerType === 'mouse' && event.target === hero) togglePlay(); });
   controls.querySelector('[data-next]').addEventListener('click', () => {
     clearTimeout(timer);
     advance(true);
@@ -80,6 +80,7 @@ function setupFrames() {
     if (reducedMotion.matches) {
       scene.replaceChildren(poster);
       current = poster;
+      current.classList.remove('outgoing');
       current.classList.add('current');
       current.removeAttribute('aria-hidden');
       index = 0;
@@ -145,26 +146,6 @@ function setupFilters() {
   readUrl();
 }
 
-
-function setupBooking() {
-  const form = document.querySelector('.booking-form');
-  if (!form) return;
-  const {check_in: arrival, check_out: departure} = form.elements;
-  const localDay = date => [date.getFullYear(), String(date.getMonth() + 1).padStart(2,'0'),
-    String(date.getDate()).padStart(2,'0')].join('-');
-  function sync() {
-    const today = localDay(new Date());
-    arrival.min = today;
-    const first = arrival.value > today ? arrival.value : today;
-    const next = new Date(first + 'T12:00:00');
-    next.setDate(next.getDate() + 1);
-    departure.min = localDay(next);
-    if (departure.value && departure.value < departure.min) departure.value = '';
-  }
-  arrival.addEventListener('input', sync);
-  window.addEventListener('pageshow', sync);
-  sync();
-}
 
 function setupGallery() {
   const reel = document.querySelector('.gallery');
@@ -276,6 +257,33 @@ function setupReveals() {
   });
 }
 
+function setupIndex() {
+  const index = document.querySelector('.stay-index');
+  if (!index) return;
+  const controls = document.querySelector('.index-controls');
+  controls.hidden = false;
+  function update() {
+    controls.firstElementChild.disabled = index.scrollLeft < 2;
+    controls.lastElementChild.disabled = index.scrollWidth - index.clientWidth - index.scrollLeft < 2;
+  }
+  controls.addEventListener('click', event => {
+    const button = event.target.closest('[data-index-step]');
+    if (!button) return;
+    const step = index.children[1].offsetLeft - index.children[0].offsetLeft;
+    index.scrollBy({left:step * Number(button.dataset.indexStep), behavior:reducedMotion.matches ? 'instant' : 'smooth'});
+  });
+  index.addEventListener('scroll', update, {passive:true});
+  window.addEventListener('resize', update, {passive:true});
+  index.addEventListener('pointermove', event => {
+    if (event.pointerType !== 'mouse' || reducedMotion.matches) return;
+    const rect = index.getBoundingClientRect();
+    const progress = (event.clientY - rect.top) / rect.height - .5;
+    index.style.setProperty('--follow', Math.round(progress * 64) + 'px');
+  }, {passive:true});
+  index.addEventListener('pointerleave', () => index.style.removeProperty('--follow'));
+  update();
+}
+
 function setupCursor() {
   const fine = matchMedia('(hover:hover) and (pointer:fine) and (not (any-pointer:coarse)) and (prefers-reduced-motion:no-preference)');
   let cleanup;
@@ -288,53 +296,70 @@ function setupCursor() {
     dot.className = 'cursor-dot';
     const label = document.createElement('span');
     ring.append(label);
-    for (const el of [ring,dot]) { el.hidden = true; el.setAttribute('aria-hidden','true'); document.body.append(el); }
+    for (const el of [ring,dot]) {
+      el.setAttribute('aria-hidden','true');
+      document.body.append(el);
+    }
     const controller = new AbortController();
     const options = {passive:true, signal:controller.signal};
     let x, y, rx, ry, frame = 0, magnetic, mouseActive = false;
-    const place = (el, x, y) => { el.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0)'; };
-    function tick() {
-      rx += (x - rx) * .15;
-      ry += (y - ry) * .15;
-      place(ring, rx, ry);
-      frame = Math.abs(x-rx) + Math.abs(y-ry) > .2 ? requestAnimationFrame(tick) : 0;
+    function place(el, x, y) {
+      el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     }
-    function resetMagnet() { if (magnetic) magnetic.style.translate = ''; magnetic = null; }
+    function tick() {
+      rx += (x - rx) * .19;
+      ry += (y - ry) * .19;
+      place(ring, rx, ry);
+      frame = Math.abs(x-rx) + Math.abs(y-ry) > .15 ? requestAnimationFrame(tick) : 0;
+    }
+    function resetMagnet() {
+      if (magnetic) magnetic.style.translate = '';
+      magnetic = null;
+    }
     function hide() {
       resetMagnet();
       document.body.classList.remove('custom-pointer');
-      ring.hidden = dot.hidden = true;
       cancelAnimationFrame(frame);
       frame = 0;
     }
     function move(event) {
       mouseActive = event.pointerType === 'mouse';
-      x = event.clientX; y = event.clientY;
-      const target = event.target instanceof Element && event.target;
-      const surface = target && (target.closest('[data-cursor], a.button, .nav-book') || (target.matches('.hero') && target));
-      if (!surface || event.pointerType !== 'mouse' || target.closest('dialog, input, select, textarea, label, [contenteditable]')) { hide(); return; }
-      if (ring.hidden) { rx = x; ry = y; }
-      ring.hidden = dot.hidden = false;
+      x = event.clientX;
+      y = event.clientY;
+      const target = event.target;
+      if (!mouseActive || !(target instanceof Element) || target.closest('dialog, label, input, select, textarea, [contenteditable], .booking-form')) {
+        hide();
+        return;
+      }
+      const surface = target.closest('[data-cursor], a, button, summary');
+      if (!surface && target.closest('h1, h2, h3, p, dd, dt, .amenities li')) { hide(); return; }
+      if (rx === undefined) { rx = x; ry = y; }
       document.body.classList.add('custom-pointer');
-      label.textContent = surface.matches('.hero') ? surface.querySelector('[data-play]').dataset.cursor : (surface.dataset.cursor || '');
-      ring.classList.toggle('labeled', Boolean(label.textContent));
+      const next = surface?.dataset.cursor || (target.matches('.hero') ? target.querySelector('[data-play]').dataset.cursor : '');
+      if (next !== label.textContent) {
+        label.textContent = next;
+        if (next) label.animate([{clipPath:'inset(100% 0 0)'},{clipPath:'inset(0)'}], {duration:200});
+      }
+      ring.classList.toggle('labeled', Boolean(next));
+      const magnet = surface?.matches('a.button, .nav-book') ? surface : null;
+      if (magnet !== magnetic) resetMagnet();
+      if (magnet) {
+        magnetic = magnet;
+        const rect = magnet.getBoundingClientRect();
+        const pull = n => Math.max(-6, Math.min(6,n * .1));
+        magnet.style.translate = `${pull(x-rect.left-rect.width/2)}px ${pull(y-rect.top-rect.height/2)}px`;
+      }
       place(dot,x,y);
       if (!frame) tick();
-      if (magnetic !== surface) resetMagnet();
-      if (surface.matches('a.button, .nav-book')) {
-        magnetic = surface;
-        const rect = surface.getBoundingClientRect();
-        const pull = n => Math.max(-6, Math.min(6,n * .1));
-        magnetic.style.translate = pull(x-rect.left-rect.width/2) + 'px ' + pull(y-rect.top-rect.height/2) + 'px';
-      }
     }
+    function deactivate() { mouseActive = false; hide(); }
     document.addEventListener('pointermove',move,options);
     document.addEventListener('click', event => { if (event.pointerType === 'mouse') move(event); },options);
-    function deactivate() { mouseActive = false; hide(); }
+    document.addEventListener('toggle', event => { if (event.target.matches('dialog[open]')) deactivate(); }, {...options,capture:true});
     document.documentElement.addEventListener('pointerleave',deactivate,options);
     document.addEventListener('keydown',deactivate,options);
     window.addEventListener('scroll', () => {
-      if (mouseActive) move({target:document.elementFromPoint(x,y), pointerType:'mouse', clientX:x, clientY:y});
+      if (mouseActive && x !== undefined) move({target:document.elementFromPoint(x,y), pointerType:'mouse', clientX:x, clientY:y});
     },options);
     window.addEventListener('blur',deactivate,options);
     cleanup = () => { hide(); controller.abort(); ring.remove(); dot.remove(); };
@@ -349,8 +374,8 @@ menu.addEventListener('keydown', event => {
   if (event.key === 'Escape') { menu.open = false; menu.querySelector('summary').focus(); }
 });
 setupFrames();
+setupIndex();
 setupFilters();
-setupBooking();
 setupGallery();
 setupReveals();
 setupCursor();
