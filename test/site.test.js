@@ -93,3 +93,37 @@ test('guest rules, extras payment and error-page routing stay consistent', () =>
   assert.match(read('dist/404.html'), /404 · Page not found/);
   assert.ok(!xml.includes('/404'));
 });
+
+test('interior headings keep space between the eyebrow, title and lede', () => {
+  assert.match(read('public/style.css'), /\.page-intro h1\s*\{\s*margin:\s*1rem 0 1\.5rem;/);
+  for (const route of ['/stays/','/experiences/','/extras/','/about/','/contact/','/faq/']) {
+    assert.match(htmlFor(route), /class="page-intro shell">[\s\S]*?<h1>[\s\S]*?<\/h1><p class="lede">/);
+  }
+});
+
+test('the home index, shared frames and photographic treatments cover every stay', () => {
+  const home = htmlFor('/');
+  const index = home.match(/<ul class="stay-index">([\s\S]*?)<\/ul>/)[1];
+  for (const stay of stays) {
+    const hero = photos[stay.id][0];
+    assert.ok(index.includes('href="/stays/' + stay.slug + '/"'));
+    for (const html of [index, htmlFor('/stays/'), htmlFor('/stays/' + stay.slug + '/')]) {
+      assert.ok(html.includes('view-transition-name:stay-' + stay.slug + '"'));
+    }
+    const unit = htmlFor('/stays/' + stay.slug + '/');
+    const sourceWidth = Number(hero.wide.match(/(\d+)w$/)[1]);
+    assert.equal(unit.includes('class="unit-hero framed"'), sourceWidth <= 1024);
+  }
+  assert.match(home, /<span class="sr-only">Dusk in the Hill Country\.<\/span>/);
+  const poster = photos[stays[0].id][0];
+  for (const srcset of [poster.wide,poster.portrait]) assert.ok(home.includes('imagesrcset="' + srcset + '"'));
+});
+
+test('only explicit production origins are indexable, and the error page has no canonical', () => {
+  const indexable = process.env.CONTEXT === 'production' && Boolean(process.env.SITE_URL);
+  assert.equal(read('dist/_headers'), (indexable ? '/404.html' : '/*') + '\n  X-Robots-Tag: noindex, follow\n');
+  for (const url of urls) assert.equal(htmlFor(url.pathname).includes('content="noindex, follow"'), !indexable);
+  const missing = read('dist/404.html');
+  assert.match(missing, /content="noindex, follow"/);
+  assert.doesNotMatch(missing, /rel="canonical"/);
+});

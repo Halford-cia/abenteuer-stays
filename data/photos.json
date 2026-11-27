@@ -8,7 +8,12 @@
       "alt": "The lit dome on its raised deck, with a hanging bed and round pool below",
       "medium": "/images/serenity-1-960.webp",
       "wide": "/images/serenity-1-wide-640.avif 640w, /images/serenity-1-wide-960.avif 960w, /images/serenity-1-wide-1280.avif 1280w, /images/serenity-1-wide-2560.avif 2560w",
-      "portrait": "/images/serenity-1-portrait-480.avif 480w, /images/serenity-1-portrait-900.avif 900w"
+      "portrait": "/images/serenity-dusk-portrait-480.avif 480w, /images/serenity-dusk-portrait-768.avif 768w, /images/serenity-dusk-portrait-900.avif 900w",
+      "motion": {
+        "focus": "62% 34%",
+        "from": "scale(1.065) translateX(-2%)",
+        "to": "scale(1.12) translateX(0%)"
+      }
     },
     {
       "src": "/images/serenity-2.webp",
@@ -49,7 +54,12 @@
       "alt": "Lunar Dome glowing between dark branches, with a staircase rising to its deck",
       "medium": "/images/lunar-1-960.webp",
       "wide": "/images/lunar-1-wide-640.avif 640w, /images/lunar-1-wide-960.avif 960w, /images/lunar-1-wide-1280.avif 1280w, /images/lunar-1-wide-1800.avif 1800w",
-      "portrait": "/images/lunar-1-portrait-480.avif 480w, /images/lunar-1-portrait-675.avif 675w"
+      "portrait": "/images/lunar-arrival-480.avif 480w, /images/lunar-arrival-675.avif 675w",
+      "motion": {
+        "focus": "46% 48%",
+        "from": "scale(1.055) translateX(2%)",
+        "to": "scale(1.11) translateX(0%)"
+      }
     },
     {
       "src": "/images/lunar-2.webp",
@@ -77,7 +87,13 @@
       "small": "/images/lunar-5-640.webp",
       "width": 1440,
       "height": 962,
-      "alt": "A wine bottle and two glasses on a small table between wicker chairs on the deck"
+      "alt": "A wine bottle and two glasses on a small table between wicker chairs on the deck",
+      "bundle": {
+        "src": "/images/lunar-wine-detail.webp",
+        "width": 565,
+        "height": 520,
+        "alt": "A single glass of red wine on a wicker deck table at Lunar Dome"
+      }
     }
   ],
   "848793194923498250": [
@@ -122,7 +138,12 @@
       "alt": "Cherry Cove’s open canvas tent, hammock and deck under a pink evening sky",
       "medium": "/images/cherry-1-960.webp",
       "wide": "/images/cherry-1-wide-640.avif 640w, /images/cherry-1-wide-960.avif 960w, /images/cherry-1-wide-1280.avif 1280w, /images/cherry-1-wide-2048.avif 2048w",
-      "portrait": "/images/cherry-1-portrait-480.avif 480w, /images/cherry-1-portrait-767.avif 767w"
+      "portrait": "/images/cherry-1-portrait-480.avif 480w, /images/cherry-1-portrait-767.avif 767w",
+      "motion": {
+        "focus": "48% 52%",
+        "from": "scale(1.13) translateX(2%)",
+        "to": "scale(1.055) translateX(0%)"
+      }
     },
     {
       "src": "/images/cherry-2.webp",
@@ -170,7 +191,8 @@
       "small": "/images/oak-3-640.webp",
       "width": 1440,
       "height": 960,
-      "alt": "A hammock and bubbling hot tub beside the lit tent on the deck"
+      "alt": "A hammock and bubbling hot tub beside the lit tent on the deck",
+      "wide": "/images/oak-3-wide-640.avif 640w, /images/oak-3-wide-960.avif 960w, /images/oak-3-wide-1440.avif 1440w, /images/oak-3-wide-2048.avif 2048w"
     },
     {
       "src": "/images/oak-4.webp",
@@ -222,7 +244,8 @@
       "alt": "Blue window seat beneath a wood-paneled ceiling in Walnut Horizon",
       "medium": "/images/walnut-1-960.webp",
       "wide": "/images/walnut-1-wide-640.avif 640w, /images/walnut-1-wide-960.avif 960w, /images/walnut-1-wide-1024.avif 1024w",
-      "portrait": "/images/walnut-1-portrait-384.avif 384w"
+      "portrait": "/images/walnut-1-portrait-384.avif 384w",
+      "framed": true
     },
     {
       "src": "/images/walnut-2.webp",
@@ -255,7 +278,8 @@
       "alt": "White tiny home opening onto a fenced deck with a round stock tank pool",
       "medium": "/images/cozy-1-960.webp",
       "wide": "/images/cozy-1-wide-640.avif 640w, /images/cozy-1-wide-960.avif 960w, /images/cozy-1-wide-1024.avif 1024w",
-      "portrait": "/images/cozy-1-portrait-432.avif 432w"
+      "portrait": "/images/cozy-1-portrait-432.avif 432w",
+      "framed": true
     },
     {
       "src": "/images/cozy-2.webp",
@@ -288,7 +312,8 @@
       "alt": "Blue-green cottage and covered porch beneath a sunset sky",
       "medium": "/images/grun-1-960.webp",
       "wide": "/images/grun-1-wide-640.avif 640w, /images/grun-1-wide-960.avif 960w, /images/grun-1-wide-1024.avif 1024w",
-      "portrait": "/images/grun-1-portrait-384.avif 384w"
+      "portrait": "/images/grun-1-portrait-384.avif 384w",
+      "framed": true
     },
     {
       "src": "/images/grun-2.webp",
@@ -322,7 +347,8 @@
       "alt": "Long porch of The Hidden Tavern overlooking a stone fire pit at dusk",
       "medium": "/images/tavern-1-960.webp",
       "wide": "/images/tavern-1-wide-640.avif 640w, /images/tavern-1-wide-960.avif 960w, /images/tavern-1-wide-1024.avif 1024w",
-      "portrait": "/images/tavern-1-portrait-384.avif 384w"
+      "portrait": "/images/tavern-1-portrait-384.avif 384w",
+      "framed": true
     },
     {
       "src": "/images/tavern-2.webp",
