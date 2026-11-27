@@ -1,4 +1,6 @@
 // Keep the listing, handoff fields and reservation copy together when changing providers.
+// Guesty phase A: a stay mapped in data/guesty-listings.json gets live availability and a quote
+// (public/live-booking.js and the Netlify Functions under /api/stays/). Book still hands off to Airbnb.
 export function airbnbListing(stay) {
   return 'https://www.airbnb.com/rooms/' + stay.id;
 }
@@ -11,7 +13,8 @@ export function bookingPanel(stay) {
   const {url, label, provider} = bookingFor(stay);
   const options = Array.from({length: stay.guests}, (_, i) =>
     `<option value="${i + 1}"${i === 1 ? ' selected' : ''}>${i + 1}</option>`).join('');
-  return `<aside class="booking-panel" id="availability" aria-labelledby="booking-title">
+  const live = stay.live ? ` data-live="/api/stays/${stay.slug}"` : '';
+  return `<aside class="booking-panel" id="availability" aria-labelledby="booking-title"${live}>
     <h2 id="booking-title">Your dates.</h2>
     <button type="button" class="calendar-trigger text-link" data-calendar-open hidden>Choose on calendar</button>
     <form action="${url}" method="get" class="booking-form">

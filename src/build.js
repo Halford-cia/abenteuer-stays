@@ -5,12 +5,16 @@ import { about, collection, contact, experiences, extras, faqs, home, missing, u
 import { amenities, escapeHtml as h, footer, header, json, portraitMedia, stayPath } from './components.js';
 import { airbnbListing } from './booking.js';
 import { faqFor, instagram } from '../data/editorial.js';
+import { resolveStay } from '../netlify/lib/stay-api.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = join(root, 'dist');
 const load = async name => JSON.parse(await readFile(join(root, 'data', name), 'utf8'));
 const photos = await load('photos.json');
-const stays = (await load('stays.json')).map(stay => ({ ...stay, photos: photos[stay.id] }));
+const stayFacts = await load('stays.json');
+const guestyListings = await load('guesty-listings.json');
+const stays = stayFacts.map(stay => ({ ...stay, photos: photos[stay.id],
+  live: Boolean(resolveStay(stay.slug, stayFacts, guestyListings).listingId) }));
 const faq = faqFor(stays);
 const production = process.env.CONTEXT === 'production';
 const indexable = production && Boolean(process.env.SITE_URL);
@@ -67,7 +71,7 @@ const pages = [
       ({'@type':'Question',name,acceptedAnswer:{'@type':'Answer',text}}))}},
   ...stays.map(stay => ({path:stayPath(stay), title:stay.name + ' | Fredericksburg, TX | Stay Eden',
     description:`${stay.name} is a ${stay.type.toLowerCase()} for ${stay.guests} guests near Fredericksburg. ${stay.feature}. Explore photos, amenities and guest ratings.`,
-    image:stay.photos[0],render:() => unit(stay, bundle),schema:rental(stay),overPhoto:true,
+    image:stay.photos[0],render:() => unit(stay, bundle),schema:rental(stay),overPhoto:true,live:stay.live,
     breadcrumbs:['Home','The stays',stay.name].map((name,i) => ({'@type':'ListItem',position:i+1,name,item:absolute(['/', '/stays/', stayPath(stay)][i])}))}))
 ];
 
@@ -93,7 +97,7 @@ ${page.path !== '/' && !page.breadcrumbs ? '<link rel="preload" href="/fonts/fra
 <link rel="stylesheet" href="/style.css">
 ${page.breadcrumbs ? '<link rel="preload" href="/fonts/dm-sans.woff2" as="font" type="font/woff2" crossorigin>' : ''}
 <script src="/site.js" defer></script>
-${page.breadcrumbs ? '<script src="/booking.js" defer></script>' : ''}
+${page.breadcrumbs ? '<script src="/booking.js" defer></script>' : ''}${page.live ? '<script src="/live-booking.js" defer></script>' : ''}
 <script type="application/ld+json">${json({'@context':'https://schema.org', ...schema})}</script>
 ${page.breadcrumbs ? `<script type="application/ld+json">${json({'@context':'https://schema.org','@type':'BreadcrumbList',itemListElement:page.breadcrumbs})}</script>` : ''}
 </head><body>${header(page.path, page.path === '/' || page.overPhoto)}<main id="main" tabindex="-1">${page.render()}</main>${footer(page.path)}</body></html>\n`;

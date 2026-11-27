@@ -72,16 +72,20 @@ function setupBooking() {
         let endpoint = '';
         if (value === (start || arrival.value)) endpoint = 'Check-in';
         else if (!start && value === departure.value) endpoint = 'Check-out';
-        button.setAttribute('aria-label',endpoint ? endpoint + ', ' + label(current) : label(current));
+        // Live Guesty data (public/live-booking.js) marks closed nights; they stay focusable for the arrow keys.
+        const live = button.disabled ? null : window.stayLive?.dayState(value, start);
+        button.setAttribute('aria-label',(endpoint ? endpoint + ', ' + label(current) : label(current)) + (live?.blocked ? ', not available' : ''));
+        if (live?.blocked) { button.setAttribute('aria-disabled','true'); button.classList.add('blocked'); }
         if (value === today) button.setAttribute('aria-current','date');
-        if (endpoint) button.className = 'chosen';
+        if (endpoint) button.classList.add('chosen');
         if (d === 1) button.style.gridColumnStart = date.getDay()+1;
         grid.append(button);
       }
       section.append(grid);
       months.append(section);
     }
-    if (start) prompt.textContent = `Check-in ${label(parse(start))}. Choose check-out.`;
+    const minimum = start ? window.stayLive?.minNights(start) || 1 : 1;
+    if (start) prompt.textContent = `Check-in ${label(parse(start))}.${minimum > 1 ? ` ${minimum}-night minimum.` : ''} Choose check-out.`;
     else if (arrival.value >= today && departure.value > arrival.value) {
       prompt.textContent = `Check-in ${label(parse(arrival.value))}. Check-out ${label(parse(departure.value))}. Choose a new check-in to change your dates.`;
     } else prompt.textContent = 'Choose check-in.';
@@ -113,14 +117,17 @@ function setupBooking() {
       render();
       focusDay();
     } else if (button.dataset.day) {
+      // Check the rule as it is now, not as it was when the day was drawn.
+      if (button.getAttribute('aria-disabled') === 'true' || window.stayLive?.dayState(button.dataset.day, start).blocked) return;
       if (start) {
         arrival.value = start;
         departure.value = button.dataset.day;
         sync();
         dialog.close();
+        form.dispatchEvent(new Event('change'));
       } else {
         start = button.dataset.day;
-        showDate(day(offset(parse(start),1)));
+        showDate(day(offset(parse(start),window.stayLive?.minNights(start) || 1)));
       }
     }
   });
@@ -133,6 +140,23 @@ function setupBooking() {
     showDate(value < earliest ? earliest : value);
   });
   desktop.addEventListener('change', () => { if (dialog.open) { render(); focusDay(); } });
+  // Live availability (public/live-booking.js) can arrive while the calendar is open: redraw it in
+  // place, keeping focus on the same day when focus was on a day. A check-in picked before the data
+  // arrived is checked again: if it is now closed, the picker goes back to choosing check-in, with
+  // focus on that day.
+  window.addEventListener('staylive', () => {
+    if (!dialog.open) return;
+    const onDay = months.contains(document.activeElement);
+    const pending = start;
+    if (pending && window.stayLive?.dayState(pending, '').blocked) {
+      start = '';
+      showDate(pending);
+      prompt.textContent = `Check-in is not available on ${label(parse(pending))}. Choose check-in.`;
+      return;
+    }
+    render();
+    if (onDay) focusDay();
+  });
 }
 
 setupBooking();

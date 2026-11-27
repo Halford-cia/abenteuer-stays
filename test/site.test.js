@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { faqFor, paymentSafety } from '../data/editorial.js';
 import { bookingFor } from '../src/booking.js';
@@ -126,4 +126,17 @@ test('only explicit production origins are indexable, and the error page has no 
   const missing = read('dist/404.html');
   assert.match(missing, /content="noindex, follow"/);
   assert.doesNotMatch(missing, /rel="canonical"/);
+});
+
+// Round 5, fix 2: `npm run check` must load on every Node the repo declares (package.json
+// engines >=22, README "Node 22+"). module.registerHooks only exists from Node 22.15, so the
+// route test fixture stubs modules on disk instead; this keeps that API out of the code and tests.
+test('the code and tests use no module loader hook newer than the declared Node 22 floor', () => {
+  assert.equal(JSON.parse(read('package.json')).engines.node, '>=22');
+  assert.match(read('README.md'), /Node 22\+/);
+  const files = ['src', 'test', 'scripts', 'netlify', 'public'].flatMap(dir =>
+    readdirSync(new URL(dir + '/', root), {recursive: true}).filter(f => /\.m?js$/.test(f)).map(f => dir + '/' + f));
+  assert.ok(files.includes('test/routes.test.js'));
+  const hook = new RegExp('register' + 'Hooks');   // split so this file does not match itself
+  for (const file of files) assert.doesNotMatch(read(file).replace(/\/\/.*$/gm, ''), hook, file);
 });
