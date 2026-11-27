@@ -17,7 +17,8 @@
       "Indoor soaking tub",
       "Kitchenette",
       "Charcoal grill"
-    ]
+    ],
+    "petsAllowed": false
   },
   {
     "slug": "lunar-dome",
@@ -38,7 +39,8 @@
       "King bed",
       "Kitchenette",
       "Hammock"
-    ]
+    ],
+    "petsAllowed": false
   },
   {
     "slug": "cloud-dome",
@@ -58,7 +60,8 @@
       "Wooded bluff setting",
       "Outdoor shower",
       "Indoor walk-in shower"
-    ]
+    ],
+    "petsAllowed": false
   },
   {
     "slug": "cherry-cove",
@@ -79,7 +82,8 @@
       "Hammock chairs",
       "Kitchenette",
       "En-suite walk-in shower"
-    ]
+    ],
+    "petsAllowed": false
   },
   {
     "slug": "oak-retreat",
@@ -100,7 +104,8 @@
       "Hammock chairs",
       "Kitchenette",
       "En-suite walk-in shower"
-    ]
+    ],
+    "petsAllowed": false
   },
   {
     "slug": "pecan-haven",
@@ -121,7 +126,8 @@
       "Hammock chairs",
       "Indoor and outdoor showers",
       "Smart TV"
-    ]
+    ],
+    "petsAllowed": false
   },
   {
     "slug": "walnut-horizon",
@@ -141,7 +147,8 @@
       "Full kitchen",
       "Indoor soaking tub",
       "Convertible California king sofa bed"
-    ]
+    ],
+    "petsAllowed": true
   },
   {
     "slug": "cozy-tiny-home",
@@ -161,7 +168,8 @@
       "Lofted king bed",
       "Fenced private deck",
       "Kitchen"
-    ]
+    ],
+    "petsAllowed": false
   },
   {
     "slug": "das-grun-haus",
@@ -183,7 +191,8 @@
       "Fire pit",
       "Yard games",
       "Charcoal grill"
-    ]
+    ],
+    "petsAllowed": true
   },
   {
     "slug": "the-hidden-tavern",
@@ -191,7 +200,6 @@
     "name": "The Hidden Tavern",
     "type": "Country house",
     "guests": 16,
-    "plus": true,
     "hotTub": true,
     "cowboyPool": false,
     "rating": 4.87,
@@ -205,6 +213,7 @@
       "Five bedrooms",
       "Upstairs bunkroom",
       "Full kitchen"
-    ]
+    ],
+    "petsAllowed": true
   }
 ]

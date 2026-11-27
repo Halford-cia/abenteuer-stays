@@ -13,6 +13,7 @@ Node 22 or later builds plain HTML from src/ and data/ into dist/. Each route wo
 ## Editing
 
 - Keep unit facts, amenities and review snapshots in data/. Verify changes with the host or the corresponding public listing. Use aggregate counts only. Never commit or collect guest PII, booking records, private messages, credentials or secrets.
+- Refresh the dated host and unit review snapshots together when preparing a release. Compare each listing’s pet rule and guest capacity with the unit facts and confirm any discrepancy with Hank.
 - Keep booking-provider URLs and calls to action in src/booking.js. The v1 provider is Airbnb. Hank will select the direct-booking engine.
 - Update the site and its structured data from the same facts. Use the actual unit's photos, descriptive alt text, reserved image dimensions and responsive image sizes. Respect reduced motion.
 - Build and check on a feature branch. Open a PR against main. Every merge is Hank's.

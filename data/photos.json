@@ -6,14 +6,17 @@
       "width": 1720,
       "height": 1290,
       "alt": "The lit dome on its raised deck, with a hanging bed and round pool below",
-      "medium": "/images/serenity-1-960.webp"
+      "medium": "/images/serenity-1-960.webp",
+      "wide": "/images/serenity-1-wide-640.avif 640w, /images/serenity-1-wide-960.avif 960w, /images/serenity-1-wide-1280.avif 1280w, /images/serenity-1-wide-2560.avif 2560w",
+      "portrait": "/images/serenity-1-portrait-480.avif 480w, /images/serenity-1-portrait-900.avif 900w"
     },
     {
       "src": "/images/serenity-2.webp",
       "small": "/images/serenity-2-640.webp",
       "width": 1440,
       "height": 1080,
-      "alt": "Two stools at the breakfast counter overlooking trees through the dome window"
+      "alt": "Two stools at the breakfast counter overlooking trees through the dome window",
+      "wide": "/images/serenity-2-wide-640.avif 640w, /images/serenity-2-wide-960.avif 960w, /images/serenity-2-wide-1280.avif 1280w, /images/serenity-2-wide-2560.avif 2560w"
     },
     {
       "src": "/images/serenity-3.webp",
@@ -44,7 +47,9 @@
       "width": 1720,
       "height": 1147,
       "alt": "Lunar Dome glowing between dark branches, with a staircase rising to its deck",
-      "medium": "/images/lunar-1-960.webp"
+      "medium": "/images/lunar-1-960.webp",
+      "wide": "/images/lunar-1-wide-640.avif 640w, /images/lunar-1-wide-960.avif 960w, /images/lunar-1-wide-1280.avif 1280w, /images/lunar-1-wide-1800.avif 1800w",
+      "portrait": "/images/lunar-1-portrait-480.avif 480w, /images/lunar-1-portrait-675.avif 675w"
     },
     {
       "src": "/images/lunar-2.webp",
@@ -82,7 +87,9 @@
       "width": 1720,
       "height": 1147,
       "alt": "Cloud Dome lit from inside at dusk with a round hot tub next to the deck",
-      "medium": "/images/cloud-1-960.webp"
+      "medium": "/images/cloud-1-960.webp",
+      "wide": "/images/cloud-1-wide-640.avif 640w, /images/cloud-1-wide-960.avif 960w, /images/cloud-1-wide-1280.avif 1280w, /images/cloud-1-wide-1800.avif 1800w",
+      "portrait": "/images/cloud-1-portrait-480.avif 480w, /images/cloud-1-portrait-675.avif 675w"
     },
     {
       "src": "/images/cloud-2.webp",
@@ -113,7 +120,9 @@
       "width": 1720,
       "height": 1147,
       "alt": "Cherry Cove’s open canvas tent, hammock and deck under a pink evening sky",
-      "medium": "/images/cherry-1-960.webp"
+      "medium": "/images/cherry-1-960.webp",
+      "wide": "/images/cherry-1-wide-640.avif 640w, /images/cherry-1-wide-960.avif 960w, /images/cherry-1-wide-1280.avif 1280w, /images/cherry-1-wide-2048.avif 2048w",
+      "portrait": "/images/cherry-1-portrait-480.avif 480w, /images/cherry-1-portrait-767.avif 767w"
     },
     {
       "src": "/images/cherry-2.webp",
@@ -134,7 +143,8 @@
       "small": "/images/cherry-4-640.webp",
       "width": 1440,
       "height": 961,
-      "alt": "Wooded deck with a hammock and two chairs outside Cherry Cove"
+      "alt": "Wooded deck with a hammock and two chairs outside Cherry Cove",
+      "wide": "/images/cherry-4-wide-640.avif 640w, /images/cherry-4-wide-960.avif 960w, /images/cherry-4-wide-1280.avif 1280w, /images/cherry-4-wide-2048.avif 2048w"
     }
   ],
   "849204946415304899": [
@@ -144,7 +154,9 @@
       "width": 1720,
       "height": 1147,
       "alt": "Oak Retreat’s open tent glowing among tree trunks at dusk",
-      "medium": "/images/oak-1-960.webp"
+      "medium": "/images/oak-1-960.webp",
+      "wide": "/images/oak-1-wide-640.avif 640w, /images/oak-1-wide-960.avif 960w, /images/oak-1-wide-1280.avif 1280w, /images/oak-1-wide-2048.avif 2048w",
+      "portrait": "/images/oak-1-portrait-480.avif 480w, /images/oak-1-portrait-767.avif 767w"
     },
     {
       "src": "/images/oak-2.webp",
@@ -175,7 +187,9 @@
       "width": 1720,
       "height": 1147,
       "alt": "Pecan Haven’s illuminated tent on a raised platform with the hot tub below",
-      "medium": "/images/pecan-1-960.webp"
+      "medium": "/images/pecan-1-960.webp",
+      "wide": "/images/pecan-1-wide-640.avif 640w, /images/pecan-1-wide-960.avif 960w, /images/pecan-1-wide-1280.avif 1280w, /images/pecan-1-wide-1800.avif 1800w",
+      "portrait": "/images/pecan-1-portrait-480.avif 480w, /images/pecan-1-portrait-675.avif 675w"
     },
     {
       "src": "/images/pecan-2.webp",
@@ -206,7 +220,9 @@
       "width": 1720,
       "height": 1148,
       "alt": "Blue window seat beneath a wood-paneled ceiling in Walnut Horizon",
-      "medium": "/images/walnut-1-960.webp"
+      "medium": "/images/walnut-1-960.webp",
+      "wide": "/images/walnut-1-wide-640.avif 640w, /images/walnut-1-wide-960.avif 960w, /images/walnut-1-wide-1024.avif 1024w",
+      "portrait": "/images/walnut-1-portrait-384.avif 384w"
     },
     {
       "src": "/images/walnut-2.webp",
@@ -237,7 +253,9 @@
       "width": 1720,
       "height": 1290,
       "alt": "White tiny home opening onto a fenced deck with a round stock tank pool",
-      "medium": "/images/cozy-1-960.webp"
+      "medium": "/images/cozy-1-960.webp",
+      "wide": "/images/cozy-1-wide-640.avif 640w, /images/cozy-1-wide-960.avif 960w, /images/cozy-1-wide-1024.avif 1024w",
+      "portrait": "/images/cozy-1-portrait-432.avif 432w"
     },
     {
       "src": "/images/cozy-2.webp",
@@ -268,14 +286,17 @@
       "width": 1720,
       "height": 1148,
       "alt": "Blue-green cottage and covered porch beneath a sunset sky",
-      "medium": "/images/grun-1-960.webp"
+      "medium": "/images/grun-1-960.webp",
+      "wide": "/images/grun-1-wide-640.avif 640w, /images/grun-1-wide-960.avif 960w, /images/grun-1-wide-1024.avif 1024w",
+      "portrait": "/images/grun-1-portrait-384.avif 384w"
     },
     {
       "src": "/images/grun-2.webp",
       "small": "/images/grun-2-640.webp",
       "width": 1440,
       "height": 961,
-      "alt": "Adirondack chairs gathered around the lit fire pit behind the cottage"
+      "alt": "Adirondack chairs gathered around the lit fire pit behind the cottage",
+      "wide": "/images/grun-2-wide-640.avif 640w, /images/grun-2-wide-960.avif 960w, /images/grun-2-wide-1024.avif 1024w"
     },
     {
       "src": "/images/grun-3.webp",
@@ -299,7 +320,9 @@
       "width": 1720,
       "height": 1148,
       "alt": "Long porch of The Hidden Tavern overlooking a stone fire pit at dusk",
-      "medium": "/images/tavern-1-960.webp"
+      "medium": "/images/tavern-1-960.webp",
+      "wide": "/images/tavern-1-wide-640.avif 640w, /images/tavern-1-wide-960.avif 960w, /images/tavern-1-wide-1024.avif 1024w",
+      "portrait": "/images/tavern-1-portrait-384.avif 384w"
     },
     {
       "src": "/images/tavern-2.webp",

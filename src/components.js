@@ -7,7 +7,7 @@ export function json(value) {
 }
 
 export const stayPath = stay => '/stays/' + stay.slug + '/';
-export const capacity = stay => stay.guests + (stay.plus ? '+' : '') + ' guests';
+export const capacity = stay => stay.guests + ' guests';
 export const amenities = stay => [
   ...(stay.hotTub && !stay.amenities.includes('Two private hot tubs') ? ['Private hot tub'] : []),
   ...(stay.cowboyPool ? ['Cowboy pool'] : []),
@@ -43,7 +43,7 @@ export function header(route, overPhoto = false) {
 export function footer(route) {
   return `<footer class="site-footer"><div class="shell footer-top"><div>${brand}<p>Fredericksburg, Texas</p></div>
     <nav aria-label="Footer">${siteLinks.map(item => link(item, route)).join('')}</nav></div>
-    <div class="shell footer-base"><span>Stay Eden · Abenteuer Management</span><a href="https://www.instagram.com/stayeden_fredericksburgtx/">Instagram</a></div></footer>`;
+    <div class="shell footer-base"><span>© ${new Date().getUTCFullYear()} Stay Eden · Abenteuer Management</span><a href="https://www.instagram.com/stayeden_fredericksburgtx/">Instagram</a></div></footer>`;
 }
 
 export function photo(image, {sizes = '100vw', priority = false, className = ''} = {}) {
@@ -52,11 +52,20 @@ export function photo(image, {sizes = '100vw', priority = false, className = ''}
     class="${className}" ${priority ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">`;
 }
 
+// The portrait crop is reserved for full-height mobile heroes.
+export function picture(image, options = {}, portrait = false) {
+  if (!image.wide) return photo(image, options);
+  const sizes = options.sizes || '100vw';
+  return `<picture>${portrait && image.portrait ? `<source media="(orientation: portrait) and (max-width: 900px)" type="image/avif" srcset="${image.portrait}" sizes="100vw">` : ''}
+    <source type="image/avif" srcset="${image.wide}" sizes="${sizes}">${photo(image, options)}</picture>`;
+}
+
 export function stayCard(stay, {filter = false, priority = false} = {}) {
   return `<article class="stay-card" ${filter ? `data-stay data-guests="${stay.guests}" data-tub="${stay.hotTub}" data-pool="${stay.cowboyPool}"` : ''}>
-    <a class="card-link" href="${stayPath(stay)}">
-      <div class="card-image"><picture><source media="(max-width: 609px)" srcset="${stay.photos[0].small}">
-      ${photo(stay.photos[0], {sizes:'(min-width: 960px) 30vw, 45vw', priority})}</picture></div>
+    <a class="card-link" href="${stayPath(stay)}" data-cursor="View">
+      <div class="card-image" style="view-transition-name:stay-${stay.slug}">
+        ${picture(stay.photos[0], {sizes:'(max-width: 609px) 90vw, (max-width: 959px) 44vw, 30vw', priority})}
+      </div>
       <p class="card-meta">${stay.type}<span>·</span>${capacity(stay)}</p>
       <h3>${stay.name}</h3><p class="card-desc">${stay.feature}</p></a></article>`;
 }
@@ -67,7 +76,7 @@ export function pageIntro(section, title, copy) {
 
 export function splitFeature({image, label, title, text, href, cta, dark = false, priority = false}) {
   return `<section class="feature-band${dark ? ' forest' : ''}"><div class="split-feature shell">
-    <div class="feature-photo reveal">${photo(image,{sizes:'(min-width: 800px) 52vw, 100vw', priority})}</div>
+    <div class="feature-photo">${picture(image,{sizes:'(min-width: 800px) 52vw, 100vw', priority})}</div>
     <div class="feature-copy">${eyebrow(label)}<h2>${title}</h2><p>${text}</p><a class="text-link" href="${href}">${cta}</a></div>
     </div></section>`;
 }
