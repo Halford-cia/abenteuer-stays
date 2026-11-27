@@ -76,6 +76,22 @@ In Netlify → Logs → Functions, a working call logs `status:"ok"`. The other 
 | `quote_total_mismatch` / `quote_currency_mismatch` / `quote_malformed` / `quote_ambiguous` / `calendar_malformed` | Guesty's reply could not be shown exactly, so the page shows the Airbnb handoff alone. Send Claude the log line. |
 | `quote_expired` | Guesty's quote expired before it could be shown. |
 
+### Calendar failure and recovery (two passes, one tab)
+
+Use Chrome on a **mapped** stay in the Deploy Preview, with DevTools open on the Network tab the whole time. Do not use the Offline setting: it takes the page itself away. Pressing Book takes this tab to Airbnb, so the handoff and the retry are checked in two separate passes.
+
+**Pass 1: the handoff while the calendar fails.**
+
+1. Find the `/api/stays/<mapped-slug>/calendar` request, right-click it and choose **Block request URL**. Leave the site online.
+2. Reload the stay. The page and the booking form load normally, and no nights are struck through.
+3. Choose dates and adults and press **Book**. Airbnb opens in this tab with your dates and adults.
+
+**Pass 2: the retry, on a fresh visit.**
+
+4. With the URL still blocked, paste the mapped stay's preview address into this tab's address bar and press Enter. Network shows a new `/calendar` request that failed (blocked).
+5. Keep this page open from here on: do not reload it and do not press Book. In the Network request blocking panel, unblock the URL (untick or remove it).
+6. Wait **at least 60 seconds**, then open the date picker. Network shows exactly **one new** `/calendar` request answering 200, and a night you know is booked is now marked unavailable.
+
 ## 7. Map the tenth stay
 
 Once step 6 passes on both kinds of page, fill the tenth stay, run `npm run check`, and push. No token is involved, because the site reuses its token for 24 hours.

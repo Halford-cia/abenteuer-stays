@@ -998,3 +998,68 @@ test('an incomplete listing list names the later wait for the retry, and the gui
   assert.match(step4, /incomplete[^\n]*the later of the two/);
   assert.doesNotMatch(guide, /wait the 24 hours|24-hour wait in step 4|new 24-hour wait/);
 });
+
+// Round 6, fix 2: a listing request that times out, or a token reply that cannot be read, ends in
+// a fresh error that names the operation and the one effective wait (a native timeout's message is
+// read-only, so it cannot be appended to), and a later stop is printed as soon as headers arrive.
+test('the owner script keeps the operation and the effective wait when a request times out or a reply is unreadable', async () => {
+  // A request that never answers: only the script's own timeout signal ends it, with its native reason.
+  // The held timer stands in for the open socket: Node 22 does not let AbortSignal.timeout keep the
+  // process alive on its own.
+  const hang = init => new Promise((resolve, reject) => {
+    const socket = setTimeout(() => {}, 10000);
+    init.signal.addEventListener('abort', () => { clearTimeout(socket); reject(init.signal.reason); });
+  });
+  const listingHangs = tokenHeaders => async (url, init = {}) => (new URL(url).href === TOKEN_URL
+    ? json(200, {token_type: 'Bearer', expires_in: 86400, access_token: TOKEN}, tokenHeaders)
+    : hang(init));
+  const owner = async fetchMock => {
+    const lines = [];
+    const error = await run({env: {GUESTY_BE_CLIENT_ID: CLIENT, GUESTY_BE_CLIENT_SECRET: SECRET}, fetch: fetchMock,
+      log: line => lines.push(line), now: () => NOW, stays, timeoutMs: 50}).then(() => null, e => e);
+    assert.ok(error, 'the run must stop');
+    return {error, out: lines.join('\n')};
+  };
+  // The native timeout on the listing request: no TypeError about a getter.
+  let {error, out} = await owner(listingHangs({'ratelimit-remaining': '4'}));
+  assert.equal(error.constructor, Error);
+  assert.doesNotMatch(error.message, /getter|Cannot set/);
+  assert.match(error.message, /listing request/i);
+  assert.match(error.message, /no answer within/);
+  assert.match(error.message, /before 2026-12-02T18:00:00\.000Z/);
+  assert.ok(!out.includes('Suggested data/guesty-listings.json'));
+  // The same timeout after a 30-hour stop names the later time.
+  ({error} = await owner(listingHangs({'ratelimit-remaining': '0', 'ratelimit-reset': String(30 * 3600)})));
+  assert.match(error.message, /before 2026-12-03T00:00:00\.000Z/);
+  assert.doesNotMatch(error.message, /2026-12-02T18:00/);
+  // A 200 token reply with a 30-hour stop and an empty body: the later stop is printed before the
+  // body is read, and the error repeats it.
+  ({error, out} = await owner(async () => json(200, undefined, {'ratelimit-remaining': '0', 'ratelimit-reset': String(30 * 3600)})));
+  assert.match(out, /blank until 2026-12-03T00:00:00\.000Z/);
+  assert.equal(error.constructor, Error);
+  assert.match(error.message, /token reply/i);
+  assert.match(error.message, /before 2026-12-03T00:00:00\.000Z/);
+  assert.doesNotMatch(error.message, /JSON|Unexpected/);
+  // A token request that never answers: the 24-hour time, and the operation.
+  ({error, out} = await owner(async (url, init) => hang(init)));
+  assert.match(error.message, /token request/i);
+  assert.match(error.message, /before 2026-12-02T18:00:00\.000Z/);
+  // Nothing secret reaches the error or the terminal.
+  for (const text of [error.message, out]) for (const secret of [SECRET, TOKEN]) assert.ok(!text.includes(secret));
+});
+
+// Round 6, fix 3: Book takes the tab to Airbnb, so the calendar smoke is two passes: the handoff
+// first, then a fresh visit with the block still on, and the retry checked on that page.
+test('the guide\'s calendar smoke checks the handoff, then returns to the stay before checking the retry', () => {
+  const guide = read('docs/GUESTY_SETUP.md');
+  const smoke = guide.slice(guide.indexOf('### Calendar failure and recovery'), guide.indexOf('## 7.'));
+  assert.ok(smoke.length > 40, 'step 6 has a calendar failure and recovery smoke');
+  const order = ['Pass 1', 'Block request URL', 'Book', 'Airbnb', 'Pass 2', 'still blocked', 'failed', 'Keep this page open', 'unblock', '60 seconds', 'one new', 'unavailable'];
+  let at = -1;
+  for (const step of order) {
+    const next = smoke.indexOf(step, at + 1);
+    assert.ok(next > at, `"${step}" comes next in the calendar smoke`);
+    at = next;
+  }
+  assert.doesNotMatch(smoke, /(choose|select|set|switch)[^.\n]*Offline/i);   // only "do not use" it
+});
