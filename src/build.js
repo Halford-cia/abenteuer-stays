@@ -90,7 +90,9 @@ ${page.missing ? '' : `<link rel="canonical" href="${h(pageUrl)}">`}${indexable 
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preload" ${page.path === '/' ? 'media="(min-width: 901px)" ' : ''}href="/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
 ${page.path !== '/' && !page.breadcrumbs ? '<link rel="preload" href="/fonts/fraunces-italic.woff2" as="font" type="font/woff2" crossorigin>' : ''}
-<link rel="stylesheet" href="/style.css"><script src="/site.js" defer></script>
+<link rel="stylesheet" href="/style.css">
+${page.breadcrumbs ? '<link rel="preload" href="/fonts/dm-sans.woff2" as="font" type="font/woff2" crossorigin>' : ''}
+<script src="/site.js" defer></script>
 ${page.breadcrumbs ? '<script src="/booking.js" defer></script>' : ''}
 <script type="application/ld+json">${json({'@context':'https://schema.org', ...schema})}</script>
 ${page.breadcrumbs ? `<script type="application/ld+json">${json({'@context':'https://schema.org','@type':'BreadcrumbList',itemListElement:page.breadcrumbs})}</script>` : ''}
@@ -110,4 +112,5 @@ await writeFile(join(output,'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${pages.map(page =>
   '  <url><loc>' + h(absolute(page.path)) + '</loc></url>').join('\n')}\n</urlset>\n`);
 await writeFile(join(output,'robots.txt'), 'User-agent: *\nAllow: /\nSitemap: ' + absolute('/sitemap.xml') + '\n');
+await writeFile(join(output,'_headers'), (indexable ? '/404.html' : '/*') + '\n  X-Robots-Tag: noindex, follow\n');
 console.log(`Built ${pages.length} pages for ${origin} (${indexable ? 'indexable production' : 'noindex'}).`);

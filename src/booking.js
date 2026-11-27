@@ -26,9 +26,9 @@ export function bookingPanel(stay) {
       <p>After booking, copy this request into your Airbnb reservation thread.</p>
       <p data-request>Could we add the $75 wine and early check-in bundle to our stay?</p>
       <button type="button" class="text-link" data-copy hidden>Copy request</button><span role="status" data-copy-status></span></details>
-    <dialog class="calendar" aria-labelledby="calendar-title"><header><h2 id="calendar-title">Choose your dates</h2>
+    <dialog class="calendar" aria-labelledby="calendar-title" aria-describedby="calendar-prompt"><header><h2 id="calendar-title">Choose your dates</h2>
       <button type="button" data-calendar-close>Close</button></header>
-      <p data-calendar-prompt aria-live="polite"></p>
+      <p id="calendar-prompt" data-calendar-prompt aria-live="polite"></p>
       <div class="month-nav"><button type="button" data-month="-1" aria-label="Previous month">Previous</button>
         <button type="button" data-month="1" aria-label="Next month">Next</button></div>
       <div class="months" data-months></div></dialog></aside>`;

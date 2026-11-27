@@ -54,7 +54,7 @@
       "alt": "Lunar Dome glowing between dark branches, with a staircase rising to its deck",
       "medium": "/images/lunar-1-960.webp",
       "wide": "/images/lunar-1-wide-640.avif 640w, /images/lunar-1-wide-960.avif 960w, /images/lunar-1-wide-1280.avif 1280w, /images/lunar-1-wide-1800.avif 1800w",
-      "portrait": "/images/lunar-1-portrait-480.avif 480w, /images/lunar-1-portrait-675.avif 675w",
+      "portrait": "/images/lunar-arrival-480.avif 480w, /images/lunar-arrival-675.avif 675w",
       "motion": {
         "focus": "46% 48%",
         "from": "scale(1.055) translateX(2%)",

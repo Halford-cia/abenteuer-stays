@@ -121,6 +121,7 @@ test('the home index, shared frames and photographic treatments cover every stay
 
 test('only explicit production origins are indexable, and the error page has no canonical', () => {
   const indexable = process.env.CONTEXT === 'production' && Boolean(process.env.SITE_URL);
+  assert.equal(read('dist/_headers'), (indexable ? '/404.html' : '/*') + '\n  X-Robots-Tag: noindex, follow\n');
   for (const url of urls) assert.equal(htmlFor(url.pathname).includes('content="noindex, follow"'), !indexable);
   const missing = read('dist/404.html');
   assert.match(missing, /content="noindex, follow"/);

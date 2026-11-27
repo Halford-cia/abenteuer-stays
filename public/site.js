@@ -69,7 +69,16 @@ function setupFrames() {
     schedule();
   }
   play.addEventListener('click', togglePlay);
-  hero.addEventListener('click', event => { if (event.pointerType === 'mouse' && event.target === hero) togglePlay(); });
+  const finePointer = matchMedia('(hover: hover) and (pointer: fine)');
+  let mouseOnBackdrop = false;
+  hero.addEventListener('pointerdown', event => {
+    mouseOnBackdrop = finePointer.matches && event.pointerType === 'mouse' && event.button === 0 && event.target === hero;
+  });
+  hero.addEventListener('pointercancel', () => { mouseOnBackdrop = false; });
+  hero.addEventListener('click', event => {
+    if (mouseOnBackdrop && event.target === hero && event.detail > 0) togglePlay();
+    mouseOnBackdrop = false;
+  });
   controls.querySelector('[data-next]').addEventListener('click', () => {
     clearTimeout(timer);
     advance(true);
@@ -260,6 +269,19 @@ function setupReveals() {
 function setupIndex() {
   const index = document.querySelector('.stay-index');
   if (!index) return;
+  let selected;
+  function select(link) {
+    if (!link || link === selected) return;
+    selected?.classList.remove('selected');
+    selected = link;
+    selected.classList.add('selected');
+  }
+  select(index.querySelector('.index-link:focus') || index.querySelector('.index-link'));
+  index.classList.add('has-preview');
+  index.addEventListener('focusin', event => select(event.target.closest('.index-link')));
+  index.addEventListener('pointerover', event => {
+    if (event.pointerType === 'mouse') select(event.target.closest('.index-link'));
+  });
   const controls = document.querySelector('.index-controls');
   controls.hidden = false;
   function update() {
@@ -275,7 +297,9 @@ function setupIndex() {
   index.addEventListener('scroll', update, {passive:true});
   window.addEventListener('resize', update, {passive:true});
   index.addEventListener('pointermove', event => {
-    if (event.pointerType !== 'mouse' || reducedMotion.matches) return;
+    if (event.pointerType !== 'mouse') return;
+    select(event.target.closest('.index-link'));
+    if (reducedMotion.matches) return;
     const rect = index.getBoundingClientRect();
     const progress = (event.clientY - rect.top) / rect.height - .5;
     index.style.setProperty('--follow', Math.round(progress * 64) + 'px');

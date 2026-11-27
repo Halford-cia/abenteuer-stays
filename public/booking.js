@@ -69,16 +69,22 @@ function setupBooking() {
         button.textContent = d;
         button.disabled = value < earliest;
         button.tabIndex = value === focused ? 0 : -1;
-        button.setAttribute('aria-label',label(current));
+        let endpoint = '';
+        if (value === (start || arrival.value)) endpoint = 'Check-in';
+        else if (!start && value === departure.value) endpoint = 'Check-out';
+        button.setAttribute('aria-label',endpoint ? endpoint + ', ' + label(current) : label(current));
         if (value === today) button.setAttribute('aria-current','date');
-        if (value === start || (!start && [arrival.value,departure.value].includes(value))) button.className = 'chosen';
+        if (endpoint) button.className = 'chosen';
         if (d === 1) button.style.gridColumnStart = date.getDay()+1;
         grid.append(button);
       }
       section.append(grid);
       months.append(section);
     }
-    prompt.textContent = start ? `Check-in ${label(parse(start))}. Choose check-out.` : 'Choose check-in.';
+    if (start) prompt.textContent = `Check-in ${label(parse(start))}. Choose check-out.`;
+    else if (arrival.value >= today && departure.value > arrival.value) {
+      prompt.textContent = `Check-in ${label(parse(arrival.value))}. Check-out ${label(parse(departure.value))}. Choose a new check-in to change your dates.`;
+    } else prompt.textContent = 'Choose check-in.';
   }
   function focusDay() { months.querySelector('[tabindex="0"]')?.focus({preventScroll:true}); }
   function showDate(value) {

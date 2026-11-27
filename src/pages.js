@@ -84,6 +84,8 @@ export function unit(stay, bundle) {
   const booking = bookingFor(stay);
   const hero = stay.photos[0];
   const framed = hero.framed;
+  const detail = stay.photos[1];
+  const portrait = detail.height > detail.width;
   const facts = [capacity(stay), stay.type, stay.amenities.includes('Two private hot tubs') ? 'Two private hot tubs' : 'Private hot tub'];
   if (stay.cowboyPool) facts.push('Cowboy pool');
   return `<section class="unit-hero${framed ? ' framed' : ''}"><div class="unit-still stay-frame" style="view-transition-name:stay-${stay.slug}">
@@ -94,7 +96,7 @@ export function unit(stay, bundle) {
       <a class="button dark" href="#availability">${booking.label}</a></div></div>
     <section class="unit-intro shell">${eyebrow('The experience')}<h2>Inside <em>the stay.</em></h2><p class="lede">${stay.description}</p>
       <ul class="fact-row">${facts.map(fact => `<li>${h(fact)}</li>`).join('')}</ul></section>
-    <figure class="unit-spread">${picture(stay.photos[1])}</figure>
+    <figure class="unit-spread shell${portrait ? ' portrait' : ''}">${picture(detail,{sizes:portrait ? 'min(89vw, 28rem)' : 'min(89vw, 60rem)'})}</figure>
     <div class="shell unit-body"><div><section class="unit-section"><h2>Amenities</h2><ul class="amenities">${amenities(stay).map(item => `<li>${h(item)}</li>`).join('')}</ul></section>
     <section class="unit-section"><h2>House rules</h2><p>Plan for up to ${stay.guests} overnight guests when booking. ${stay.petsAllowed ? 'Airbnb lists pets as welcome here.' : 'Airbnb lists this stay as pet-free.'} Service animals are welcome.</p>
       <a class="text-link" href="${booking.url}">Read the Airbnb house rules</a></section>
