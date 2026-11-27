@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createGuesty, tokenBackoffMs, GuestyUnavailable, TOKEN_ALLOWANCE, sealKey, openToken } from '../netlify/lib/guesty.js';
 import { calendarResponse, quoteResponse, mapQuote, mapCalendar, quoteLifetime, resolveStay, today, addDays } from '../netlify/lib/stay-api.js';
-import { suggest, listAllListings, requestOwnerToken, MAX_PAGES } from '../scripts/guesty-listings.mjs';
+import { suggest, listAllListings, requestOwnerToken, run, MAX_PAGES } from '../scripts/guesty-listings.mjs';
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 const stays = JSON.parse(read('data/stays.json'));
@@ -811,4 +811,137 @@ test('a token 429 waits for the whole Retry-After, beyond 24 hours, in seconds o
   assert.equal(tokenBackoffMs(429, 0, res({'retry-after': new Date(NOW + 30 * 3600e3).toUTCString()}), NOW), 30 * 3600e3);
   assert.equal(tokenBackoffMs(429, 0, res({'retry-after': '60'}), NOW), 15 * 60e3);           // never less than 15 minutes
   assert.equal(tokenBackoffMs(429, 0, res({}), NOW), 3600e3);
+});
+
+// ---- Round 3 (review 441r3) ----
+
+// Blocker 1: Guesty's stop, once received, is kept by the same write that lifts the hold.
+const stalledBody = headers => init => new Response(new ReadableStream({
+  start(controller) { init.signal.addEventListener('abort', () => controller.error(init.signal.reason)); }
+}), {status: 200, headers});
+for (const [name, handler, faults, freeAt] of [
+  // Good headers saying no slot is left for 2 hours, then the body stalls past the deadline.
+  ['headers that report zero slots, then a stalled body', stalledBody({'ratelimit-remaining': '0', 'ratelimit-reset': '7200'}), {}, 7200e3],
+  // Zero slots left and no usable reset: the conservative 24 hours.
+  ['a zero balance without a reset', () => json(500, {}, {'ratelimit-remaining': '0'}), {}, 86400e3],
+  // A 429 with a 2-hour Retry-After, and only the later cooldown write to the lease fails.
+  ['an auth 429 whose lease cooldown write fails', () => json(429, {}, {'retry-after': '7200'}), {'token-lease': n => (n === 2 ? 'throw' : undefined)}, 7200e3]
+]) {
+  test(`no cold function asks for a token inside Guesty's stop: ${name}`, async () => {
+    const guesty = fakeGuesty([[TOKEN_URL, handler]]);
+    const d = deps(guesty, {store: memoryStore({faults}), timeoutMs: 15});
+    for (const seconds of [0, 181, 550, 3600]) {
+      d.tick(seconds * 1000 - (d.now() - NOW));
+      await calendarResponse('lunar-dome', {...d, memo: {}});
+    }
+    assert.equal(guesty.tokenCalls(), 1, 'a token request inside Guesty\'s stop');
+    const record = d.store.data.get('token-issuance').value;
+    assert.equal(record.hold, undefined, 'the answer was not recorded');
+    // Just before the stop ends: still nothing. Just after: one request.
+    d.tick(freeAt - 3600e3 - 1e3);
+    await calendarResponse('lunar-dome', {...d, memo: {}});
+    assert.equal(guesty.tokenCalls(), 1);
+    d.tick(2e3);
+    await calendarResponse('lunar-dome', {...d, memo: {}});
+    assert.equal(guesty.tokenCalls(), 2);
+  });
+}
+
+test('the token cooldown is written with the answer, in the write that lifts the hold', async () => {
+  let seen = null;
+  const store = memoryStore();
+  const real = store.setJSON.bind(store);
+  store.setJSON = async (key, value, options) => {
+    if (key === 'token-issuance' && !value.hold) seen = structuredClone(value);
+    return real(key, value, options);
+  };
+  const guesty = fakeGuesty([[TOKEN_URL, () => json(429, {}, {'retry-after': '7200', 'ratelimit-remaining': '0', 'ratelimit-reset': '7200'})]]);
+  await calendarResponse('lunar-dome', deps(guesty, {store}));
+  assert.equal(seen.retryAt, NOW + 7200e3);
+  assert.deepEqual(seen.guesty, {remaining: 0, at: NOW, resetAt: NOW + 7200e3});
+});
+
+// Fix 8: a quote's expiry must be a date-time, and its currency one Guesty lists.
+test('a quote with an unreadable expiry or a currency Guesty does not list is refused, uncached', async () => {
+  const body = extra => ({...quoteBody(standardItems, standardMoney), ...extra});
+  for (const [name, quote] of [
+    ['expiresAt "2099"', body({expiresAt: '2099'})],
+    ['expiresAt without a time', body({expiresAt: '2026-12-02'})],
+    ['expiresAt without a zone', body({expiresAt: '2026-12-02T18:00:00'})],
+    ['currency ZZZ', quoteWith(schemaPlan('Standard', standardItems.map(item => ({...item, currency: 'ZZZ'})), {...standardMoney, currency: 'ZZZ'}))]
+  ]) {
+    assert.throws(() => mapQuote(quote, {checkIn: '2026-12-10', checkOut: '2026-12-13'}), /quote_malformed/, name);
+    const guesty = fakeGuesty([[TOKEN_URL, tokenOk], [QUOTE_URL, () => json(200, quote)]]);
+    const d = deps(guesty);
+    const res = await quoteResponse('lunar-dome', params(goodQuery), d);
+    assert.equal(res.status, 502, name);
+    assert.equal(res.headers.get('cache-control'), 'no-store', name);
+    assert.deepEqual(await res.json(), {ok: false}, name);
+    assert.deepEqual(statuses(d), ['quote_malformed'], name);
+  }
+  // A well-formed but distant expiry is shown no longer than Guesty's 24-hour price hold.
+  const guesty = fakeGuesty([[TOKEN_URL, tokenOk], [QUOTE_URL, () => json(200, body({expiresAt: '2099-01-01T00:00:00Z'}))]]);
+  const res = await quoteResponse('lunar-dome', params(goodQuery), deps(guesty));
+  assert.equal((await res.json()).validFor, 86400 - 60 - 600);
+  // The documented forms are read: UTC with milliseconds, and an offset.
+  assert.equal(mapQuote(body({expiresAt: '2026-12-02T18:00:00.000Z'})).expiresAt, Date.parse('2026-12-02T18:00:00Z'));
+  assert.equal(mapQuote(body({expiresAt: '2026-12-02T12:00:00-06:00'})).expiresAt, Date.parse('2026-12-02T18:00:00Z'));
+});
+
+// Fix 3: one Guesty listing for two rooms is a setup mistake, refused before it can show a price.
+test('a Guesty listing id mapped to two stays gives neither stay live data', async () => {
+  const twice = {'lunar-dome': LISTING, 'cloud-dome': ' ' + LISTING};
+  assert.equal(resolveStay('lunar-dome', stays, twice).listingId, null);
+  assert.equal(resolveStay('cloud-dome', stays, twice).listingId, null);
+  assert.equal(resolveStay('lunar-dome', stays, {...twice, 'cloud-dome': ''}).listingId, LISTING);
+  const guesty = fakeGuesty([]);
+  const d = deps(guesty, {listings: twice});
+  assert.equal((await quoteResponse('lunar-dome', params(goodQuery), d)).status, 404);
+  assert.equal((await calendarResponse('cloud-dome', d)).status, 404);
+  assert.equal(guesty.calls.length, 0);
+  assert.deepEqual(statuses(d), ['mapping_conflict', 'mapping_conflict']);
+  // The checked-in map repeats no id.
+  const ids = Object.values(JSON.parse(read('data/guesty-listings.json'))).map(id => id.trim()).filter(Boolean);
+  assert.equal(new Set(ids).size, ids.length, 'data/guesty-listings.json maps one Guesty listing to two stays');
+});
+
+// Fix 5: the owner wait is the later of 24 hours and Guesty's own stop.
+test('the owner script prints Guesty\'s stop when it is later than the 24-hour wait', async () => {
+  const lines = [];
+  const log = line => lines.push(line);
+  await assert.rejects(requestOwnerToken({fetch: async () => json(429, {}, {'retry-after': '172800', 'ratelimit-remaining': '0'}),
+    clientId: CLIENT, clientSecret: SECRET, log, now: () => NOW}), /2026-12-03T18:00:00\.000Z/);
+  assert.match(lines[0], /2026-12-02T18:00:00\.000Z/);                     // the first warning stays 24 hours
+  // A reset later than 24 hours, on success, also moves the wait.
+  lines.length = 0;
+  await requestOwnerToken({fetch: async () => json(200, {access_token: TOKEN, expires_in: 86400}, {'ratelimit-remaining': '0', 'ratelimit-reset': String(30 * 3600)}),
+    clientId: CLIENT, clientSecret: SECRET, log, now: () => NOW});
+  assert.match(lines.join('\n'), /blank until 2026-12-03T00:00:00\.000Z/);
+  // An earlier stop changes nothing: 24 hours.
+  lines.length = 0;
+  await assert.rejects(requestOwnerToken({fetch: async () => json(429, {}, {'retry-after': '60'}), clientId: CLIENT, clientSecret: SECRET, log, now: () => NOW}),
+    error => !/2026-12-03/.test(error.message) && /24-hour wait above still applies/.test(error.message));
+  assert.match(read('docs/GUESTY_SETUP.md'), /later of/);
+});
+
+// Fix 6: the owner script, end to end: the listing pages must carry the bearer Guesty issued.
+test('the owner script lists every page with the token it was issued', async () => {
+  const ISSUED = 'mock-issued-bearer';
+  const pages = {'': {results: [{_id: 'aaaaaa1', title: 'Lunar Dome'}], pagination: {total: 2, cursor: {next: 'c2'}}},
+    c2: {results: [{_id: 'bbbbbb2', title: 'Cloud Dome'}], pagination: {total: 2, cursor: {next: null}}}};
+  const seen = [];
+  const fetchMock = async (url, init = {}) => {
+    const href = new URL(url);
+    if (href.href === TOKEN_URL) return json(200, {token_type: 'Bearer', expires_in: 86400, access_token: ISSUED}, {'ratelimit-remaining': '4'});
+    seen.push(init.headers && init.headers.authorization);
+    if (!init.headers || init.headers.authorization !== 'Bearer ' + ISSUED) return json(401, {error: 'unauthorized'});
+    return json(200, pages[href.searchParams.get('cursor') || '']);
+  };
+  const lines = [];
+  await run({env: {GUESTY_BE_CLIENT_ID: CLIENT, GUESTY_BE_CLIENT_SECRET: SECRET}, fetch: fetchMock, log: line => lines.push(line), now: () => NOW, stays});
+  assert.deepEqual(seen, ['Bearer ' + ISSUED, 'Bearer ' + ISSUED]);
+  const out = lines.join('\n');
+  assert.match(out, /aaaaaa1 {2}Lunar Dome/);
+  assert.match(out, /bbbbbb2 {2}Cloud Dome/);
+  assert.match(out, /"lunar-dome": "aaaaaa1"/);
 });

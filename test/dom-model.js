@@ -104,8 +104,13 @@ export class Element {
   focus() { this.ownerDocument.activeElement = this; }
   showModal() { this.open = true; }
   close() { this.open = false; }
-  // A real browser fires no click on a disabled button.
-  click() { if (!this.disabled) this.dispatchEvent(new Event('click', {bubbles: true})); }
+  // A real browser fires no click on a disabled button. A submit button that is clicked submits
+  // its form (unless the click was prevented), as a guest's tap on Book does.
+  click() {
+    if (this.disabled) return;
+    const proceed = this.dispatchEvent(new Event('click', {bubbles: true}));
+    if (proceed && this.tagName === 'button' && this.type === 'submit') this.closest('form')?.requestSubmit();
+  }
   get elements() {
     const fields = this.descendants().filter(n => ['input', 'select'].includes(n.tagName) && n.name);
     return Object.fromEntries(fields.map(f => [f.name, f]));
@@ -150,7 +155,7 @@ const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8'
 
 // Loads dist/stays/<slug>/index.html's booking panel and runs booking.js, then live-booking.js when
 // the built page includes it, exactly in the page's order.
-export function builtPage(slug, {fetch, html} = {}) {
+export function builtPage(slug, {fetch, html, now} = {}) {
   const source = html ?? read(`dist/stays/${slug}/index.html`);
   const start = source.indexOf('<aside class="booking-panel"');
   const end = source.indexOf('</aside>', start) + '</aside>'.length;
@@ -168,19 +173,21 @@ export function builtPage(slug, {fetch, html} = {}) {
     addEventListener: (type, fn) => { (documentListeners[type] ||= []).push(fn); },
     dispatchEvent: event => { for (const fn of documentListeners[event.type] || []) fn(event); return true; }
   });
-  // The page's clock: real time plus an offset the test can advance. Timers longer than a minute
-  // (a quote's expiry) are held here and fire only when advance() passes them, so a test never
-  // waits on, or is kept alive by, a real long timer.
-  const clock = {offset: 0, timers: new Map(), next: 1};
+  // The page's clock: real time plus an offset the test can advance. Timers longer than ten
+  // seconds (a quote's expiry) are held here and fire only when advance() passes them, so a test
+  // never waits on, or is kept alive by, a real long timer. Held timers run on elapsed time
+  // (`elapsed`), as browser timers do, so shiftWall() can move the wall clock (a device clock
+  // correction) without moving them. now: start the page's wall clock at this time.
+  const clock = {offset: now === undefined ? 0 : now - Date.now(), elapsed: 0, timers: new Map(), next: 1};
   const RealDate = Date;
   class PageDate extends RealDate {
     constructor(...args) { if (args.length) super(...args); else super(RealDate.now() + clock.offset); }
     static now() { return RealDate.now() + clock.offset; }
   }
   const pageSetTimeout = (fn, ms = 0) => {
-    if (ms <= 60e3) return setTimeout(fn, ms);
+    if (ms <= 10e3) return setTimeout(fn, ms);
     const id = 'long-' + clock.next++;
-    clock.timers.set(id, {fn, due: PageDate.now() + ms, ms});
+    clock.timers.set(id, {fn, due: clock.elapsed + ms, ms});
     return id;
   };
   const pageClearTimeout = id => { if (clock.timers.has(id)) clock.timers.delete(id); else clearTimeout(id); };
@@ -210,11 +217,15 @@ export function builtPage(slug, {fetch, html} = {}) {
     // back/forward cache, where held timers have not run.
     advance: async (ms, {fireTimers = true} = {}) => {
       clock.offset += ms;
+      // A sleeping device: wall time passes, timers do not run. Awake, both move together.
       if (fireTimers) {
-        for (const [id, timer] of [...clock.timers]) if (timer.due <= PageDate.now()) { clock.timers.delete(id); timer.fn(); }
+        clock.elapsed += ms;
+        for (const [id, timer] of [...clock.timers]) if (timer.due <= clock.elapsed) { clock.timers.delete(id); timer.fn(); }
       }
       await settle();
     },
+    // Move only the wall clock (Date.now), as a device clock correction does; timers keep their pace.
+    shiftWall: ms => { clock.offset += ms; },
     longTimers: () => [...clock.timers.values()].map(t => t.ms),
     fireWindow: async type => { ctx.dispatchEvent(new Event(type)); await settle(); },
     fireDocument: async type => { doc.dispatchEvent(new Event(type)); await settle(); },

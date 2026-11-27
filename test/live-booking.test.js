@@ -90,12 +90,18 @@ const echo = (extra = {}) => url => {
   return reply(quoteFor(q.checkIn, q.checkOut, q.guests, typeof extra === 'function' ? extra(q) : extra));
 };
 
-// The Book form must hand off to this stay's Airbnb room with the guest's dates and adults.
+// The Book form must hand off to this stay's Airbnb room with the guest's dates and adults, when the
+// guest taps the rendered Book button itself (enabled, a submit control of this form).
 function assertAirbnbHandoff(p, checkIn, checkOut, adults) {
   assert.equal(p.form.action, airbnbListing(lunar));
-  const url = p.form.requestSubmit();
-  assert.ok(url, 'the submit was prevented');
-  const sent = new URL(url);
+  const book = p.form.querySelectorAll('button').filter(b => b.type === 'submit');
+  assert.equal(book.length, 1, 'one Book button');
+  assert.equal(book[0].disabled, false, 'the Book button is disabled');
+  assert.equal(book[0].getAttribute('aria-disabled'), null, 'the Book button is marked disabled');
+  const before = p.doc.navigations.length;
+  book[0].click();
+  assert.equal(p.doc.navigations.length, before + 1, 'tapping Book did not submit the form');
+  const sent = new URL(p.doc.navigations.at(-1));
   assert.equal(sent.origin + sent.pathname, airbnbListing(lunar));
   assert.deepEqual([...sent.searchParams], [['check_in', checkIn], ['check_out', checkOut], ['adults', adults]]);
 }
@@ -173,13 +179,14 @@ test('built page: an expired price is taken down on return to the page and asked
   await p.advance(25 * 3600e3, {fireTimers: false});
   assert.match(p.box().textContent, /\$305\.00/);                           // nothing has run yet
   await p.fireWindow('pageshow');
-  assert.equal(p.requested.length, 3, 'a new quote was requested');
+  // The day-old availability is asked for again too (round 3, fix 2), then the price.
+  assert.deepEqual(p.requested.slice(2).map(url => url.split('?')[0]), ['/api/stays/lunar-dome/calendar', '/api/stays/lunar-dome/quote'], 'a new quote was requested');
   assert.match(p.box().textContent, /\$405\.00/);
   assert.doesNotMatch(p.box().textContent, /\$305/);
   // Expiry by the timer, and a refresh that fails: the old price is hidden, Book still hands off.
   fail = true;
   await p.advance((DAY_S - 720) * 1000);
-  assert.equal(p.requested.length, 4);
+  assert.equal(p.requested.length, 5);
   assert.equal(p.box().hidden, true);
   assert.equal(p.box().textContent, '');
   assertAirbnbHandoff(p, D(10), D(12), '2');
@@ -327,4 +334,123 @@ test('guest-facing code never holds a Guesty credential or calls Guesty directly
     assert.doesNotMatch(source, /guesty\.com|GUESTY_BE_|client_secret/i, file);
   }
   assert.match(read('netlify.toml'), /CONTENT-SECURITY-POLICY|Content-Security-Policy = "default-src 'self'/i);
+});
+
+// ---- Round 3 (review 441r3) ----
+
+const failed = () => Promise.resolve({ok: false, json: () => Promise.resolve({ok: false})});
+const calendarCalls = p => p.requested.filter(url => url.endsWith('/calendar')).length;
+const quoteCalls = p => p.requested.filter(url => url.includes('/quote?')).length;
+
+// Blocker 2: the expiry timer runs on elapsed time; a wall-clock correction must not keep the price.
+test('built page: when the expiry timer fires the price goes, even after the device clock was set back', async () => {
+  let fail = false;
+  const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: url => {
+    if (url.endsWith('/calendar')) return reply(calendar);
+    if (fail) return failed();
+    const q = query(url);
+    return reply(quoteFor(q.checkIn, q.checkOut, q.guests, {validFor: 60}));
+  }});
+  p.idle();
+  await p.settle();
+  await p.choose(D(10), D(12), '2');
+  assert.match(p.box().textContent, /\$544\.50/);
+  fail = true;
+  p.shiftWall(-10e3);                                                       // the device clock is corrected back 10 s
+  await p.advance(61e3);                                                    // the 60 s timer fires; the wall clock says +51 s
+  assert.equal(quoteCalls(p), 2, 'the price was not asked for again');
+  assert.equal(p.box().hidden, true);
+  assert.doesNotMatch(p.box().textContent, /\$544/);
+  assertAirbnbHandoff(p, D(10), D(12), '2');
+  // On return, a price whose remaining life cannot be told (the clock now reads before its receipt)
+  // is taken down and asked for again.
+  const q = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: echo({validFor: 600})});
+  q.idle();
+  await q.settle();
+  await q.choose(D(10), D(12), '2');
+  assert.match(q.box().textContent, /\$544\.50/);
+  q.shiftWall(-3600e3);
+  await q.fireWindow('pageshow');
+  assert.equal(quoteCalls(q), 2);
+});
+
+// Blocker 3: a return after midnight changes the stay; the old price must not outlive it.
+test('built page: a return after midnight that clears check-out takes the price down, and a late reply is not shown', async () => {
+  const eve = new Date(2026, 11, 1, 23, 55).getTime();                      // 11:55 p.m. local
+  const oneNight = q => ({nights: 1, nightly: [], lines: [{title: 'Accommodation fare', amount: 305}], total: 305});
+  const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], now: eve, fetch: echo(oneNight)});
+  p.idle();
+  await p.settle();
+  await p.choose('2026-12-01', '2026-12-02', '2');
+  assert.match(p.box().textContent, /\$305\.00/);
+  await p.advance(10 * 60e3, {fireTimers: false});                          // 12:05 a.m., back from the bfcache
+  await p.fireWindow('pageshow');
+  assert.equal(p.form.elements.check_out.value, '');                        // booking.js moved the minimum on
+  assert.equal(p.box().hidden, true);
+  assert.doesNotMatch(p.box().textContent, /\$305/);
+  assert.equal(quoteCalls(p), 1);
+  // Back by focus alone (booking.js does not run): the arrival is now in the past, so no price.
+  const f = builtPage('lunar-dome', {html: mapped['lunar-dome'], now: eve, fetch: echo(oneNight)});
+  f.idle();
+  await f.settle();
+  await f.choose('2026-12-01', '2026-12-02', '2');
+  assert.match(f.box().textContent, /\$305\.00/);
+  await f.advance(10 * 60e3, {fireTimers: false});
+  await f.fireWindow('focus');
+  assert.equal(f.box().hidden, true);
+  // A reply that arrives after the stay changed is never rendered.
+  let deliver;
+  const late = builtPage('lunar-dome', {html: mapped['lunar-dome'], now: eve, fetch: url => {
+    if (url.endsWith('/calendar')) return reply(calendar);
+    const q = query(url);
+    return new Promise(resolve => { deliver = () => resolve({ok: true, json: () => Promise.resolve(quoteFor(q.checkIn, q.checkOut, q.guests, oneNight()))}); });
+  }});
+  late.idle();
+  await late.settle();
+  await late.choose('2026-12-01', '2026-12-02', '2');
+  await late.advance(10 * 60e3, {fireTimers: false});
+  await late.fireWindow('pageshow');
+  deliver();
+  await late.settle();
+  assert.equal(late.box().hidden, true);
+  assert.doesNotMatch(late.box().textContent, /\$305/);
+});
+
+// Fix 2: availability ages; a returning guest gets it checked again, and a failed check clears it.
+test('built page: availability older than 15 minutes is checked again on return and when the picker opens; a failed check clears it', async () => {
+  let booked = true;
+  let fail = false;
+  const live = () => ({ok: true, from: D(0), to: D(364), days: [{date: D(10), available: !booked, minNights: 1, noArrival: false, noDeparture: false}]});
+  const p = builtPage('lunar-dome', {html: mapped['lunar-dome'], fetch: url =>
+    (url.endsWith('/calendar') ? (fail ? failed() : reply(live())) : reply(quoteFor(D(10), D(12), '2')))});
+  const blocked = () => p.ctx.window.stayLive?.dayState(D(10), '').blocked;
+  p.idle();
+  await p.settle();
+  assert.equal(blocked(), true);
+  booked = false;                                                           // the night is freed in Guesty
+  await p.advance(25 * 3600e3, {fireTimers: false});
+  await p.fireWindow('pageshow');
+  assert.equal(calendarCalls(p), 2, 'the day-old calendar was not checked again');
+  assert.equal(blocked(), false);
+  // Still fresh: focus and visibility do not ask again.
+  await p.fireWindow('focus');
+  await p.fireDocument('visibilitychange');
+  assert.equal(calendarCalls(p), 2);
+  // Aged again, and the guest opens the picker: checked again, and the open picker is redrawn.
+  booked = true;
+  await p.advance(16 * 60e3, {fireTimers: false});
+  p.root.querySelector('[data-calendar-open]').click();
+  await p.settle();
+  assert.equal(calendarCalls(p), 3);
+  assert.equal(blocked(), true);
+  p.dialog().close();
+  // Aged, and the check fails: no stale restriction stays, no price, and Book hands off to Airbnb.
+  fail = true;
+  await p.advance(16 * 60e3, {fireTimers: false});
+  await p.fireWindow('focus');
+  assert.equal(calendarCalls(p), 4);
+  assert.equal(p.ctx.window.stayLive, undefined);
+  await p.choose(D(10), D(12), '2');
+  assert.equal(p.box().hidden, true);
+  assertAirbnbHandoff(p, D(10), D(12), '2');
 });

@@ -67,11 +67,26 @@ export async function listAllListings(fetchImpl, token) {
 // The token request (Authentication page): POST, form-encoded grant_type, scope, client_id and
 // client_secret. The wait is printed BEFORE the request is sent, so it holds for a run that fails,
 // times out or is interrupted after Guesty may already have issued a token.
+const stamp = date => `${date.toISOString()} (${date.toLocaleString('en-US', {timeZoneName: 'short'})})`;
+
+// Guesty's own stop in a token reply, as a time, or null: a 429's Retry-After (seconds or an HTTP
+// date), and, when no slot is left, ratelimit-reset (seconds until a used slot regenerates).
+export function guestyStop(res, at) {
+  const times = [];
+  const retry = (res.headers.get('retry-after') || '').trim();
+  if (res.status === 429 && /^\d+$/.test(retry)) times.push(at + Number(retry) * 1000);
+  else if (res.status === 429 && Number.isFinite(Date.parse(retry))) times.push(Date.parse(retry));
+  const remaining = (res.headers.get('ratelimit-remaining') || '').trim();
+  const reset = (res.headers.get('ratelimit-reset') || '').trim();
+  if (remaining === '0' && /^\d+$/.test(reset)) times.push(at + Number(reset) * 1000);
+  return times.length ? Math.max(...times) : null;
+}
+
 export async function requestOwnerToken({fetch: fetchImpl, clientId, clientSecret, log, now = Date.now}) {
-  const until = new Date(now() + DAY);
-  const when = `${until.toISOString()} (${until.toLocaleString('en-US', {timeZoneName: 'short'})})`;
+  const start = now();
+  const until = start + DAY;
   log(`This run asks Guesty for one access token, from the same daily allowance the site uses.\n`
-    + `Keep every stay in data/guesty-listings.json blank until ${when}, 24 hours from now,\n`
+    + `Keep every stay in data/guesty-listings.json blank until ${stamp(new Date(until))}, 24 hours from now,\n`
     + `even if this run fails or stops. Do not run this script again before then.`);
   const res = await fetchImpl(TOKEN_URL, {
     method: 'POST',
@@ -79,11 +94,20 @@ export async function requestOwnerToken({fetch: fetchImpl, clientId, clientSecre
     body: new URLSearchParams({grant_type: 'client_credentials', scope: 'booking_engine:api', client_id: clientId, client_secret: clientSecret}),
     signal: AbortSignal.timeout(15000)
   });
+  // Once Guesty has answered, the wait is the later of the 24 hours and Guesty's own stop.
+  const stop = guestyStop(res, now());
+  const later = stop !== null && stop > until
+    ? `Guesty's own limit ends later: keep every stay blank until ${stamp(new Date(stop))}, and do not run this script again before then.`
+    : '';
   const remaining = res.headers.get('ratelimit-remaining');
-  if (!res.ok) throw new Error(`Token request refused: HTTP ${res.status}${remaining ? `, token requests left today: ${remaining}` : ''}. The 24-hour wait above still applies.`);
+  if (!res.ok) {
+    throw new Error(`Token request refused: HTTP ${res.status}${remaining ? `, token requests left today: ${remaining}` : ''}. `
+      + (later || 'The 24-hour wait above still applies.'));
+  }
   const body = await res.json();
-  if (!body || typeof body.access_token !== 'string' || !body.access_token) throw new Error('Guesty sent no access token. The 24-hour wait above still applies.');
+  if (!body || typeof body.access_token !== 'string' || !body.access_token) throw new Error('Guesty sent no access token. ' + (later || 'The 24-hour wait above still applies.'));
   if (remaining) log(`Guesty reports ${remaining} token request(s) left in its 24-hour window. The 24-hour wait above applies whatever this number is.`);
+  if (later) log(later);
   return body.access_token;
 }
 

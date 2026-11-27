@@ -107,72 +107,127 @@
   }
 
   // A shown price lasts only as long as Guesty holds it: the function says for how many seconds
-  // after this reply arrived (validFor), measured on this device's clock from receipt, so a wrong
-  // clock cannot stretch it. At that point, and whenever the guest comes back to the page, an
-  // expired price is taken down and asked for again; if that fails, no price is shown and the
-  // Airbnb form is untouched.
+  // after this reply arrived (validFor). The expiry timer counts that time, and when it fires the
+  // price goes, whatever the device's wall clock says (a clock correction cannot keep it). When the
+  // guest comes back to the page, a price is taken down and asked for again if it has expired, if
+  // its remaining life cannot be told (the clock reads before its receipt), or if the stay on the
+  // form is no longer the one it was quoted for (booking.js moves the dates on after midnight).
+  // If asking again fails, no price is shown and the Airbnb form is untouched.
   let days = null;
   let sequence = 0;
-  let shown = null;
+  let wanted = null;      // the stay a quote was asked for or is shown for: {key}
+  let shown = null;       // the price on screen: {received, until}
   let expiryTimer = null;
+  const localToday = () => {
+    const now = new Date();
+    return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+  };
+  // The stay on the form now, or '' when it is not one that can be quoted.
+  function stayKey() {
+    const checkIn = arrival.value;
+    const checkOut = departure.value;
+    if (!checkIn || !checkOut || checkOut <= checkIn || checkIn < localToday()) return '';
+    return [checkIn, checkOut, adults.value].join('|');
+  }
   function clearShown() {
     shown = null;
     clearTimeout(expiryTimer);
     expiryTimer = null;
   }
-  function expireIfDue() {
-    if (shown && Date.now() >= shown.until) {
-      clearShown();
-      update();
-    }
+  function expire() {
+    clearShown();
+    update();
   }
 
   function update() {
     const request = ++sequence;
     clearShown();
+    wanted = null;
     const checkIn = arrival.value;
     const checkOut = departure.value;
-    if (!days || !checkIn || !checkOut || checkOut <= checkIn) return show([]);
+    const key = stayKey();
+    if (!days || !key) return show([]);
     const verdict = check(days, checkIn, checkOut);
     if (!verdict.ok) {
       const message = messages[verdict.reason];
       return show([line('live-status', typeof message === 'function' ? message(verdict.minNights) : message)]);
     }
     show([line('live-status', 'Checking the rate…')]);
+    wanted = {key};
     const guests = adults.value;
     const query = new URLSearchParams({checkIn, checkOut, guests});
     getJSON(`${base}/quote?${query}`, 9000).then(quote => {
       if (request !== sequence) return;
       const received = Date.now();
-      // Only a price for exactly this stay and party, still within Guesty's hold, is shown.
+      // Only a price for exactly this stay and party, still within Guesty's hold, and still the
+      // stay on the form, is shown.
       const matches = quote && quote.checkIn === checkIn && quote.checkOut === checkOut
         && quote.guests === Number(guests) && quote.nights === nightsBetween(checkIn, checkOut)
-        && Number.isFinite(quote.validFor) && quote.validFor > 0;
-      if (!matches) return show([]);
+        && Number.isFinite(quote.validFor) && quote.validFor > 0 && stayKey() === key;
+      if (!matches) { wanted = null; return show([]); }
       renderQuote(quote);
-      shown = {until: received + quote.validFor * 1000};
-      expiryTimer = setTimeout(expireIfDue, Math.min(quote.validFor * 1000, 2 ** 31 - 1));
+      shown = {received, until: received + quote.validFor * 1000};
+      expiryTimer = setTimeout(expire, Math.min(quote.validFor * 1000, 2 ** 31 - 1));
     });
   }
 
+  // Availability ages too: the function's CDN keeps it about ten minutes, and a guest can come
+  // back to an open tab days later. Older than CALENDAR_MAX_AGE (or of unknown age, after a clock
+  // correction), it is asked for again on return and when the picker opens. If that fails, the
+  // old restrictions are dropped (no stale "taken" night stays) and the Airbnb form is untouched.
+  const CALENDAR_MAX_AGE = 15 * 60e3;
+  let loadedAt = null;
+  let loading = null;
+  function setDays(list) {
+    days = list ? rules.index(list) : null;
+    window.stayLive = days ? {
+      dayState: (value, start) => dayState(days, value, start),
+      minNights: start => (days.get(start) || {}).minNights || 1
+    } : undefined;
+    window.dispatchEvent(new Event('staylive'));
+    update();
+  }
   function load() {
-    getJSON(base + '/calendar', 8000).then(calendar => {
-      if (!calendar || !Array.isArray(calendar.days)) return;
-      days = rules.index(calendar.days);
-      window.stayLive = {
-        dayState: (value, start) => dayState(days, value, start),
-        minNights: start => (days.get(start) || {}).minNights || 1
-      };
-      window.dispatchEvent(new Event('staylive'));
-      update();
+    if (loading) return loading;
+    loading = getJSON(base + '/calendar', 8000).then(calendar => {
+      loading = null;
+      if (calendar && Array.isArray(calendar.days)) {
+        loadedAt = Date.now();
+        setDays(calendar.days);
+      } else if (days) {
+        loadedAt = null;
+        setDays(null);
+      }
     });
+    return loading;
+  }
+  const calendarAged = () => {
+    if (loadedAt === null) return false;
+    const age = Date.now() - loadedAt;
+    return age < 0 || age >= CALENDAR_MAX_AGE;
+  };
+
+  // Back from another page (bfcache), another tab or a sleeping device: timers may not have run.
+  function revalidate() {
+    const now = Date.now();
+    const priceStale = shown && (now >= shown.until || now < shown.received);
+    const stayChanged = wanted && stayKey() !== wanted.key;
+    if (priceStale || stayChanged) {
+      clearShown();
+      wanted = null;
+      sequence++;                          // a reply still on its way is not shown
+      show([]);
+    }
+    if (calendarAged()) return load();     // update() runs when it arrives
+    if (priceStale || stayChanged) update();
   }
 
   form.addEventListener('change', update);
-  // Back from another page (bfcache), another tab or a sleeping device: timers may not have run.
-  window.addEventListener('pageshow', expireIfDue);
-  window.addEventListener('focus', expireIfDue);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') expireIfDue(); });
+  window.addEventListener('pageshow', revalidate);
+  window.addEventListener('focus', revalidate);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') revalidate(); });
+  const opener = panel.querySelector('[data-calendar-open]');
+  if (opener) opener.addEventListener('click', () => { if (calendarAged()) load(); });
   if ('requestIdleCallback' in window) requestIdleCallback(load, {timeout: 3000});
   else setTimeout(load, 1500);
 })();

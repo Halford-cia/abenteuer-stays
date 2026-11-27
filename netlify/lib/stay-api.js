@@ -29,11 +29,16 @@ export function today(now = Date.now()) {
 }
 
 // The stay for a slug and its Guesty listing id, or null when the slug is unknown or unmapped.
+// One Guesty listing mapped to two stays is a setup mistake (the two rooms would show one
+// property's dates and price): neither stay gets live data until the map is corrected (conflict).
+const mappedId = (listings, slug) => (listings && typeof listings[slug] === 'string' ? listings[slug].trim() : '');
 export function resolveStay(slug, stays, listings) {
   const stay = stays.find(s => s.slug === slug);
   if (!stay) return {stay: null, listingId: null};
-  const id = listings && typeof listings[slug] === 'string' ? listings[slug].trim() : '';
-  return {stay, listingId: LISTING_ID.test(id) ? id : null};
+  const id = mappedId(listings, slug);
+  if (!LISTING_ID.test(id)) return {stay, listingId: null};
+  const conflict = Object.keys(listings).some(other => other !== slug && mappedId(listings, other) === id);
+  return conflict ? {stay, listingId: null, conflict: true} : {stay, listingId: id};
 }
 
 // Guesty's calendar day (API reference, getCalendarByListingId): status is one of four values,
@@ -72,6 +77,19 @@ export function mapCalendar(body, from, to) {
 }
 
 const money = value => typeof value === 'number' && Number.isFinite(value);
+
+// The money currencies Guesty lists for a quote (createReservationQuote response,
+// rates.ratePlans[].ratePlan.money.currency and invoiceItems[].currency, read 2026-11-27).
+export const GUESTY_CURRENCIES = new Set(['USD', 'EUR', 'AUD', 'CAD', 'JPY', 'ILS', 'GBP', 'HKD', 'NOK', 'CZK', 'BRL',
+  'CHF', 'THB', 'ZAR', 'MYR', 'KRW', 'IDR', 'PHP', 'INR', 'NZD', 'TWD', 'PLN', 'SGD', 'TRY', 'SEK', 'VND', 'ARS', 'CNY', 'DKK', 'MXN']);
+
+// expiresAt is a date-time (OpenAPI format date-time, RFC 3339): full date, time with seconds, and
+// a zone. Anything else ("2099", a bare date, a local time) is not a readable expiry.
+const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+function dateTime(value) {
+  if (typeof value !== 'string' || !DATE_TIME.test(value) || !isDate(value.slice(0, 10))) return NaN;
+  return Date.parse(value);
+}
 
 // Minor units of a currency (USD: 2), from ICU; null for a code Intl does not know.
 function precision(currency) {
@@ -138,7 +156,7 @@ function planQuote(entry, stay) {
   if (!parts) throw malformed();
   const {money: detail, name} = parts;
   const currency = detail.currency;
-  const digits = typeof currency === 'string' && /^[A-Z]{3}$/.test(currency) ? precision(currency) : null;
+  const digits = GUESTY_CURRENCIES.has(currency) ? precision(currency) : null;
   if (digits === null) throw malformed();
   if (!money(detail.hostPayout) || detail.hostPayout <= 0) throw malformed();
   const total = minor(detail.hostPayout, digits);
@@ -167,7 +185,7 @@ export function mapQuote(body, stay) {
   const plans = body && body.rates && Array.isArray(body.rates.ratePlans) ? body.rates.ratePlans : null;
   if (!plans || plans.length === 0) throw malformed();
   // Guesty's quote holds its prices until expiresAt (required in the schema; the flow guide: 24 hours).
-  const expiresAt = typeof body.expiresAt === 'string' ? Date.parse(body.expiresAt) : NaN;
+  const expiresAt = dateTime(body.expiresAt);
   if (!Number.isFinite(expiresAt)) throw malformed();
   // Any plan that cannot be read makes the quote ambiguous: refuse it rather than pick among the rest.
   const quotes = plans.map(plan => planQuote(plan, stay));
@@ -186,12 +204,15 @@ export function mapQuote(body, stay) {
 // margin, and the reply tells the browser how many seconds it may show the price after receiving it
 // (validFor), already less the longest time the reply may have sat in the CDN. A relative figure,
 // so a wrong clock on the guest's device cannot stretch it. null: too close to expiry to show.
+// The flow guide guarantees a quote's prices for 24 hours, so a later expiresAt is never trusted
+// beyond that.
 export const QUOTE_EXPIRY_MARGIN = 60;
 export const QUOTE_MIN_SHOW = 60;
 const QUOTE_CDN_FRESH = 300;
 const QUOTE_CDN_STALE = 300;
+const QUOTE_HOLD_MAX = 86400e3;
 export function quoteLifetime(expiresAt, now) {
-  const usable = Math.floor((expiresAt - now) / 1000) - QUOTE_EXPIRY_MARGIN;
+  const usable = Math.floor((Math.min(expiresAt, now + QUOTE_HOLD_MAX) - now) / 1000) - QUOTE_EXPIRY_MARGIN;
   if (!(usable >= QUOTE_MIN_SHOW)) return null;
   const cached = Math.min(QUOTE_CDN_FRESH + QUOTE_CDN_STALE, usable - QUOTE_MIN_SHOW);
   const sMaxAge = Math.min(QUOTE_CDN_FRESH, cached);
@@ -224,12 +245,12 @@ const CALENDAR_CACHE = {sMaxAge: 300, staleWhileRevalidate: 300};
  * deps: {env, store, fetch, now, log, memo, stays, listings, timeoutMs}
  */
 export async function calendarResponse(slug, deps) {
-  const {stay, listingId} = resolveStay(slug, deps.stays, deps.listings);
+  const {stay, listingId, conflict} = resolveStay(slug, deps.stays, deps.listings);
   const from = today(deps.now());
   const to = addDays(from, CALENDAR_DAYS - 1);
   const log = status => deps.log(JSON.stringify({fn: 'calendar', listing: listingId, from, to, status}));
   if (!stay || !listingId) {
-    log(stay ? 'unmapped' : 'unknown_stay');
+    log(conflict ? 'mapping_conflict' : stay ? 'unmapped' : 'unknown_stay');
     return respond(404, {ok: false}, null);
   }
   try {
@@ -247,7 +268,7 @@ export async function calendarResponse(slug, deps) {
 }
 
 export async function quoteResponse(slug, params, deps) {
-  const {stay, listingId} = resolveStay(slug, deps.stays, deps.listings);
+  const {stay, listingId, conflict} = resolveStay(slug, deps.stays, deps.listings);
   const checkIn = params.get('checkIn');
   const checkOut = params.get('checkOut');
   const guests = Number(params.get('guests'));
@@ -255,7 +276,7 @@ export async function quoteResponse(slug, params, deps) {
   const log = status => deps.log(JSON.stringify({fn: 'quote', listing: listingId,
     checkIn: datesValid ? checkIn : null, checkOut: datesValid ? checkOut : null, status}));
   if (!stay || !listingId) {
-    log(stay ? 'unmapped' : 'unknown_stay');
+    log(conflict ? 'mapping_conflict' : stay ? 'unmapped' : 'unknown_stay');
     return respond(404, {ok: false}, null);
   }
   const first = today(deps.now());

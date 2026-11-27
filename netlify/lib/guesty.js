@@ -10,8 +10,9 @@
 //   Blobs store BEFORE it is sent, so a lost reply, a timeout or a failed write after Guesty issued a
 //   token still counts; both functions share the allowance;
 // - the same write sets a hold that only the write recording Guesty's answer lifts, so a lower
-//   ratelimit-remaining from Guesty is never lost to a failed write; until its reset it lowers the
-//   allowance further;
+//   ratelimit-remaining from Guesty is never lost to a failed write; until its reset (24 hours when
+//   Guesty sent none) it lowers the allowance further. That write also stores the cooldown after a
+//   failure (a 429's whole Retry-After), and the headers are kept even when the body then stalls;
 // - one lease entry lets only one instance at a time ask for a token, and failures back off.
 // When the allowance is spent the site serves the Airbnb fallback until a slot frees up.
 // The owner script (scripts/guesty-listings.mjs) cannot write this record: after running it, every
@@ -103,10 +104,13 @@ export function openToken(record, key) {
 // error, a rejected conditional write, an instance that died), a count Guesty may have lowered is not
 // forgotten. A hold lasts 24 hours, the longest a used token slot takes to regenerate; an unreadable
 // hold counts as standing.
+// The same write also stores retryAt, the cooldown after a failed request (a 429's whole
+// Retry-After, or the backoff), so a stop Guesty sent is not lost when the separate lease write fails.
 export function allowanceLeft(record, now) {
   const attempts = (record && Array.isArray(record.attempts) ? record.attempts : []).filter(t => Number.isFinite(t) && now - t < DAY);
   const hold = record && record.hold;
   if (hold && (typeof hold !== 'object' || !Number.isFinite(hold.until) || now < hold.until)) return {left: 0, attempts, held: true};
+  if (record && Number.isFinite(record.retryAt) && now < record.retryAt) return {left: 0, attempts, held: false, cooling: true};
   let left = TOKEN_ALLOWANCE - attempts.length;
   const guesty = record && record.guesty;
   if (guesty && Number.isFinite(guesty.remaining) && Number.isFinite(guesty.at) && Number.isFinite(guesty.resetAt) && now < guesty.resetAt) {
@@ -115,12 +119,13 @@ export function allowanceLeft(record, now) {
   return {left, attempts, held: false};
 }
 
-// Guesty's own count of token slots from a token reply, or null when it sent none.
+// Guesty's own count of token slots from a token reply, or null when it sent none. A count without
+// a usable ratelimit-reset is kept for 24 hours, the longest a used slot takes to regenerate.
 function quotaFrom(res, at) {
   const raw = (res.headers.get('ratelimit-remaining') || '').trim();
+  if (!/^\d+$/.test(raw)) return null;
   const reset = headerSeconds(res, ['ratelimit-reset']);
-  if (!/^\d+$/.test(raw) || !reset) return null;
-  return {remaining: Number(raw), at, resetAt: at + reset * 1000};
+  return {remaining: Number(raw), at, resetAt: at + (reset ? reset * 1000 : DAY)};
 }
 
 /**
@@ -162,7 +167,13 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
       try {
         return {res, body: await Promise.race([res.json(), deadline])};
       } catch {
-        if (timedOut()) throw new GuestyUnavailable('timeout');
+        if (timedOut()) {
+          // The headers arrived before the body stalled: keep them, so a quota or a stop that
+          // Guesty already sent is recorded (requestToken).
+          const error = new GuestyUnavailable('timeout');
+          error.res = res;
+          throw error;
+        }
         return {res, body: undefined};
       }
     } finally {
@@ -173,16 +184,18 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
   const fresh = token => Boolean(token && typeof token.accessToken === 'string' && now() < token.expiresAt - REFRESH_EARLY_MS);
   const readToken = async () => openToken(await stored(() => store.get('token', {type: 'json'})), key);
 
-  // Record what Guesty's answer to the attempt made at `at` said, and lift that attempt's hold, in one
-  // conditional write. A rejected write is retried against the new record; if it never lands, the
-  // hold stands (no token is requested until it expires) and Guesty's count is not lost.
-  async function settle(at, quota) {
+  // Record what Guesty's answer to the attempt made at `at` said (its count, and the cooldown after
+  // a failure), and lift that attempt's hold, in one conditional write. A rejected write is retried
+  // against the new record; if it never lands, the hold stands (no token is requested until it
+  // expires) and Guesty's count is not lost.
+  async function settle(at, quota, retryAt) {
     for (let attempt = 0; attempt < SETTLE_TRIES; attempt++) {
       try {
         const current = await store.getWithMetadata('token-issuance', {type: 'json'});
         const data = {...(current && current.data)};
         if (data.hold && data.hold.at === at) delete data.hold;
         if (quota) data.guesty = quota;
+        if (retryAt) data.retryAt = Math.max(Number.isFinite(data.retryAt) ? data.retryAt : 0, retryAt);
         const write = await store.setJSON('token-issuance', data, current ? {onlyIfMatch: current.etag} : {onlyIfNew: true});
         if (write && write.modified) return true;
       } catch { /* try again; the hold stands if no try lands */ }
@@ -200,8 +213,9 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
       throw new GuestyUnavailable('token_backoff');
     }
     const issuance = await stored(() => store.getWithMetadata('token-issuance', {type: 'json'}));
-    const {left, attempts, held} = allowanceLeft(issuance && issuance.data, now());
+    const {left, attempts, held, cooling} = allowanceLeft(issuance && issuance.data, now());
     if (held) throw new GuestyUnavailable('token_hold');
+    if (cooling) throw new GuestyUnavailable('token_backoff');
     if (left <= 0) throw new GuestyUnavailable('token_allowance');
 
     const failures = Number.isInteger(state.failures) ? state.failures : 0;
@@ -215,12 +229,8 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
       issuance ? {onlyIfMatch: issuance.etag} : {onlyIfNew: true}));
     if (!counted || !counted.modified) throw new GuestyUnavailable('token_busy');
 
-    const fail = async (status, res) => {
-      await stored(() => store.setJSON('token-lease', {until: now() + tokenBackoffMs(res ? res.status : 0, failures, res, now()), failures: failures + 1}));
-      throw new GuestyUnavailable(status);
-    };
-
     let reply;
+    let lost = null;
     try {
       reply = await exchange(TOKEN_URL, {
         method: 'POST',
@@ -228,15 +238,24 @@ export function createGuesty({clientId, clientSecret, store, fetch, now = Date.n
         body: new URLSearchParams({grant_type: 'client_credentials', scope: 'booking_engine:api', client_id: clientId, client_secret: clientSecret})
       });
     } catch (error) {
-      // No answer: the attempt stays counted, and there is no count of Guesty's to keep.
-      await settle(at, null);
-      return fail('token_' + error.status);
+      lost = error;
     }
-    const {res, body} = reply;
-    await settle(at, quotaFrom(res, now()));
-    if (!res.ok) return fail('token_' + res.status, res);
-    if (!body || typeof body.access_token !== 'string' || !body.access_token || !(Number(body.expires_in) > 0)) {
-      return fail('token_malformed');
+    // The headers, whenever they arrived (a body that stalled afterwards still has them).
+    const res = reply ? reply.res : lost && lost.res;
+    const body = reply && reply.body;
+    let status = null;
+    if (lost) status = 'token_' + lost.status;
+    else if (!res.ok) status = 'token_' + res.status;
+    else if (!body || typeof body.access_token !== 'string' || !body.access_token || !(Number(body.expires_in) > 0)) status = 'token_malformed';
+    const failed = res && !res.ok ? res : null;
+    const retryAt = status ? now() + tokenBackoffMs(failed ? failed.status : 0, failures, failed, now()) : null;
+    // Guesty's count and the cooldown are written in the same write that lifts the hold.
+    await settle(at, res ? quotaFrom(res, now()) : null, retryAt);
+    if (status) {
+      // The lease carries the cooldown too, and the failure count that doubles a 401's wait; the
+      // issuance record above already holds the cooldown, so a failed lease write loses nothing.
+      try { await store.setJSON('token-lease', {until: retryAt, failures: failures + 1}); } catch { /* recorded above */ }
+      throw new GuestyUnavailable(status);
     }
     const token = {accessToken: body.access_token, expiresAt: now() + Number(body.expires_in) * 1000};
     memo.token = token;

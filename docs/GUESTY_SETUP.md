@@ -14,7 +14,9 @@ Two facts drive the order of the steps:
 
 ## 2. Check Guesty
 
-1. Open the Booking Engine API instance. Guesty's Authentication page gives the path: top menu **Growth → Distribution → Booking Engine API**. (Guesty's Help Center article on instances was not reachable to check, so the labels may differ slightly.)
+1. Open the Booking Engine API instance. Guesty gives two menu paths, so use whichever your dashboard shows:
+   - Help Center (current): **Marketing and sales → Channel management → Distribution → Guesty Booking Engine API**, then the instance's menu → **Edit API key**. This path comes from the round-3 review of PR #3. The Help Center article ([Creating and editing a Guesty Booking Engine API instance](https://help.guesty.com/hc/en-gb/articles/18132541671069-Creating-and-editing-a-Guesty-Booking-Engine-API-instance)) refuses automated readers (HTTP 403), so it could not be checked again here.
+   - Developer Authentication page (older): top menu **Growth → Distribution → Booking Engine API**.
 2. Confirm that **all ten** Stay Eden properties are assigned to this instance.
 3. Confirm that both booking sources are activated. Guesty's quote reference requires this before the reservation endpoints are used, and the sources carry your fees and taxes:
    - The **Manual** source is activated by one manual reservation in the Guesty UI. If your account already has direct reservations, you can skip this.
@@ -37,6 +39,7 @@ cd ~/str/guesty && git pull && node scripts/guesty-listings.mjs
 ```
 
 - Before the request is sent, the script prints a time 24 hours ahead. **Keep every stay in `data/guesty-listings.json` blank until that time.** This holds whatever the script prints next, including a report of 4 or 5 tokens left, an error, a timeout or a stop with Ctrl-C.
+- If Guesty answers with its own stop that ends later (a 429's `Retry-After`, or no slot left and a `ratelimit-reset` beyond 24 hours), the script prints that later time too. **Wait for the later of the two times**, both before mapping any stay and before running the script again.
 - Do not run the script again before that time. A second run starts a new 24-hour wait.
 - The script prints nothing if the listing list is incomplete: a missing results list, a listing without an id, fewer listings than Guesty's stated total, or more pages than it reads. In that case, wait the 24 hours and run it once more. Never run it in a loop.
 - It writes no file. Copy the suggested map, and check each line against the printed list.
@@ -44,6 +47,7 @@ cd ~/str/guesty && git pull && node scripts/guesty-listings.mjs
 ## 5. Map nine stays and keep one blank
 
 - After the wait, fill **nine** of the ten stays in `data/guesty-listings.json` and leave one blank on purpose. The blank stay is the fallback check in step 6.
+- Each Guesty listing id may appear **once**. If one id is entered for two stays, `npm run check` fails, and neither stay shows live data (status `mapping_conflict`) until the map is corrected.
 - Run `npm run check`; it must pass with the map filled. Then commit and push to `feat/guesty`.
 - The first page view on a mapped stay requests the site's first token. The site never requests more than its allowance.
 
@@ -66,6 +70,8 @@ In Netlify → Logs → Functions, a working call logs `status:"ok"`. The other 
 | `token_401` | Wrong credentials. See step 8. |
 | `token_allowance` | The token allowance is spent. It frees itself 24 hours after the oldest request. |
 | `token_hold` | The site could not record Guesty's answer to a token request, so it asks for no token until 24 hours after that request. It frees itself. |
+| `token_backoff` | A token request failed recently, so the site waits before the next one: Guesty's whole `Retry-After` after a 429, otherwise a short backoff. It frees itself. |
+| `mapping_conflict` | One Guesty listing id is mapped to two stays. Correct `data/guesty-listings.json`. |
 | `rate_limited` / `upstream_429` | Guesty asked the site to slow down. Every instance waits the whole Retry-After. |
 | `quote_total_mismatch` / `quote_currency_mismatch` / `quote_malformed` / `quote_ambiguous` / `calendar_malformed` | Guesty's reply could not be shown exactly, so the page shows the Airbnb handoff alone. Send Claude the log line. |
 | `quote_expired` | Guesty's quote expired before it could be shown. |
