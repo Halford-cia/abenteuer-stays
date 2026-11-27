@@ -5,6 +5,13 @@
 [build.environment]
   NODE_VERSION = "22"
 
+# Guesty Booking Engine API calls run only in these functions. GUESTY_BE_CLIENT_ID and
+# GUESTY_BE_CLIENT_SECRET are Netlify environment variables, never in the repo or the browser.
+# Routes (/api/stays/:slug/calendar, /api/stays/:slug/quote) are declared in each function's config.
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
 [[headers]]
   for = "/*"
   [headers.values]

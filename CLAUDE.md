@@ -4,7 +4,7 @@ Stay Eden is the guest-facing site for ten Hill Country rentals near Fredericksb
 
 ## Stack and commands
 
-Node 22 or later builds plain HTML from src/ and data/ into dist/. Each route works as a static document. CSS, browser JavaScript, fonts and optimized property photos live in public/. The build has no package dependencies.
+Node 22 or later builds plain HTML from src/ and data/ into dist/. Each route works as a static document. CSS, browser JavaScript, fonts and optimized property photos live in public/. The build has no package dependencies; the Netlify Functions in netlify/ use one, `@netlify/blobs` (pinned exact).
 
 - `npm run build` generates the site.
 - `npm run preview` serves the existing build at http://127.0.0.1:4173 using Python 3.
@@ -14,7 +14,12 @@ Node 22 or later builds plain HTML from src/ and data/ into dist/. Each route wo
 
 - Keep unit facts, amenities and review snapshots in data/. Verify changes with the host or the corresponding public listing. Use aggregate counts only. Never commit or collect guest PII, booking records, private messages, credentials or secrets.
 - Refresh the dated host and unit review snapshots together when preparing a release. Compare each listing’s pet rule and guest capacity with the unit facts and confirm any discrepancy with Hank.
-- Keep booking-provider URLs and calls to action in src/booking.js. The v1 provider is Airbnb. Hank will select the direct-booking engine.
+- Keep booking-provider URLs and calls to action in src/booking.js. The Book button hands off to Airbnb.
+- Guesty (Hank 2026-11-26): Stay Eden is managed in Guesty; direct booking goes through the Guesty Booking Engine API. Phase A is read only: live blocked dates, minimum nights and Guesty's quote on each stay page. No payment, card fields or reservation creation on the site.
+  - Guesty is called only from netlify/functions (lib in netlify/lib), with GUESTY_BE_CLIENT_ID and GUESTY_BE_CLIENT_SECRET from Netlify environment variables. The browser never sees a credential or a guesty.com URL (test/live-booking.test.js guards it).
+  - Tokens last 24 hours and Guesty allows only a few a day. netlify/lib/guesty.js keeps one token in the site-wide Blobs store `guesty`, leases every renewal and backs off on failure. Never request a token per request, and never delete the `token-lease` entry to force a renewal.
+  - data/guesty-listings.json maps each stay slug to its Guesty listing id; `node scripts/guesty-listings.mjs` lists the instance's listings. An unmapped stay builds exactly as before, and any Guesty failure leaves the Airbnb handoff with no message to guests.
+  - Show only amounts Guesty returns. A quote whose lines do not add up to Guesty's subtotal plus taxes is refused, never patched. Log only the listing id, the dates and a status; never log guest details, tokens or response bodies.
 - Update the site and its structured data from the same facts. Use the actual unit's photos, descriptive alt text, reserved image dimensions and responsive image sizes. Give replacement photos and social images new filenames so guests receive the updated image under the one-year immutable cache. Respect reduced motion.
 - Build and check on a feature branch. Open a PR against main. Every merge is Hank's.
 

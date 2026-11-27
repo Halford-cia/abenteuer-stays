@@ -499,4 +499,13 @@ body { font-variant-numeric: oldstyle-nums; }
 .days button { min-height: 2.6rem; padding: .25rem; border: 0; }
 .days button.chosen, .days button:not(:disabled):hover { background: var(--forest); color: white; }
 .days button[aria-current="date"] { text-decoration: underline; }
+.days button.blocked { color: var(--muted); text-decoration: line-through; opacity: .55; cursor: default; }
+.days button.blocked:hover { background: transparent; color: var(--muted); }
 @media (max-width: 759px) { .months { grid-template-columns: 1fr; } }
+.live-quote { border-top: 1px solid var(--line); padding-top: .8rem; font-size: .92rem; }
+.live-quote dl { display: grid; gap: .35rem; margin: 0; }
+.live-quote dl > div { display: flex; justify-content: space-between; gap: 1rem; }
+.live-quote dd { margin: 0; white-space: nowrap; font-variant-numeric: lining-nums tabular-nums; }
+.live-quote .live-total { border-top: 1px solid var(--line); padding-top: .45rem; margin-top: .2rem; font-weight: 600; }
+.live-quote .live-status, .live-quote .live-note { color: var(--muted); }
+.live-quote .live-note { font-size: .82rem; margin-top: .6rem; }
