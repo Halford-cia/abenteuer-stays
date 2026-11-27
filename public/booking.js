@@ -117,7 +117,8 @@ function setupBooking() {
       render();
       focusDay();
     } else if (button.dataset.day) {
-      if (button.getAttribute('aria-disabled') === 'true') return;
+      // Check the rule as it is now, not as it was when the day was drawn.
+      if (button.getAttribute('aria-disabled') === 'true' || window.stayLive?.dayState(button.dataset.day, start).blocked) return;
       if (start) {
         arrival.value = start;
         departure.value = button.dataset.day;
@@ -139,6 +140,14 @@ function setupBooking() {
     showDate(value < earliest ? earliest : value);
   });
   desktop.addEventListener('change', () => { if (dialog.open) { render(); focusDay(); } });
+  // Live availability (public/live-booking.js) can arrive while the calendar is open: redraw it in
+  // place, keeping focus on the same day when focus was on a day.
+  window.addEventListener('staylive', () => {
+    if (!dialog.open) return;
+    const onDay = months.contains(document.activeElement);
+    render();
+    if (onDay) focusDay();
+  });
 }
 
 setupBooking();

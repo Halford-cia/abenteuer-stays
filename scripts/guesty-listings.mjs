@@ -25,6 +25,32 @@ export function suggest(stays, listings) {
   return map;
 }
 
+// GET /api/listings (getApplicationListingsList): `results` is required, limit is at most 100, and
+// pagination.cursor.next is the cursor for the next page (null on the last). A reply without the
+// results array, or more pages than MAX_PAGES, is an error: never a short list that looks complete.
+export const MAX_PAGES = 20;
+export async function listAllListings(fetchImpl, token) {
+  const listings = [];
+  let cursor = '';
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = new URL('/api/listings', API_BASE);
+    url.searchParams.set('fields', '_id title');
+    url.searchParams.set('limit', '100');
+    if (cursor) url.searchParams.set('cursor', cursor);
+    const res = await fetchImpl(url, {headers: {authorization: 'Bearer ' + token, accept: 'application/json; charset=utf-8'}, signal: AbortSignal.timeout(15000)});
+    if (!res.ok) throw new Error(`Listing request refused: HTTP ${res.status}.`);
+    const body = await res.json();
+    if (!body || !Array.isArray(body.results)) throw new Error('Guesty sent a listing page without its results list; nothing was printed. Run the script again later.');
+    for (const item of body.results) {
+      if (!item || typeof item._id !== 'string' || !item._id) throw new Error('Guesty sent a listing without an id; nothing was printed.');
+      listings.push({id: item._id, title: typeof item.title === 'string' ? item.title : ''});
+    }
+    cursor = body.pagination && body.pagination.cursor && body.pagination.cursor.next;
+    if (!cursor) return listings;
+  }
+  throw new Error(`More than ${MAX_PAGES * 100} listings: the list is incomplete, so no map is suggested.`);
+}
+
 function ask(question, hidden) {
   const rl = createInterface({input: process.stdin, output: process.stdout, terminal: true});
   if (hidden) rl._writeToOutput = text => { if (text.startsWith(question)) process.stdout.write(question); };
@@ -45,22 +71,14 @@ async function main() {
   const remaining = tokenRes.headers.get('ratelimit-remaining');
   if (!tokenRes.ok) throw new Error(`Token request refused: HTTP ${tokenRes.status}${remaining ? `, token requests left today: ${remaining}` : ''}.`);
   const {access_token: token} = await tokenRes.json();
+  // This token counts against the same daily allowance as the site (3 requests per rolling 24 hours,
+  // the lower of Guesty's two published figures).
   if (remaining) console.log(`Token requests left in Guesty's 24-hour window: ${remaining}`);
+  console.log(Number(remaining) >= 4
+    ? 'Guesty reports at least 4 left: the site may request its first token any time after this run.'
+    : 'Wait 24 hours after this run before you push a filled map, so this token and the site\'s stay within the allowance.');
 
-  const listings = [];
-  let cursor = '';
-  for (let page = 0; page < 20; page++) {
-    const url = new URL('/api/listings', API_BASE);
-    url.searchParams.set('fields', '_id title');
-    url.searchParams.set('limit', '100');
-    if (cursor) url.searchParams.set('cursor', cursor);
-    const res = await fetch(url, {headers: {authorization: 'Bearer ' + token, accept: 'application/json; charset=utf-8'}, signal: AbortSignal.timeout(15000)});
-    if (!res.ok) throw new Error(`Listing request refused: HTTP ${res.status}.`);
-    const body = await res.json();
-    for (const item of body.results || []) listings.push({id: item._id, title: item.title || ''});
-    cursor = body.pagination && body.pagination.cursor && body.pagination.cursor.next;
-    if (!cursor) break;
-  }
+  const listings = await listAllListings(fetch, token);
 
   console.log(`\n${listings.length} listing(s) in this Booking Engine API instance:\n`);
   for (const listing of listings) console.log(`  ${listing.id}  ${listing.title}`);

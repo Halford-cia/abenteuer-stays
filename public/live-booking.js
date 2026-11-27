@@ -121,6 +121,7 @@
         dayState: (value, start) => dayState(days, value, start),
         minNights: start => (days.get(start) || {}).minNights || 1
       };
+      window.dispatchEvent(new Event('staylive'));
       update();
     });
   }
